@@ -1,0 +1,2 @@
+c6a7fbeefad670e684cd90d5811369e3500f80b57103231a7a122fd492c94eb9  Sonorist-v2.1.0-macOS.dmg
+c2bd96c1d7d5545d4e50f5dcfdde60eea9794ede44db2e895112648e68f044bf  Sonorist-v2.1.0-macOS.zip
