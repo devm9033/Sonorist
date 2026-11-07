@@ -79,9 +79,15 @@ public enum SonoristBundleEngine {
         return payload
     }
     
+    // Maximum allowed buffer sizes to prevent Zip-Bomb & Denial-of-Service attacks
+    private static let maxMetadataSize = 5 * 1024 * 1024   // 5 MB
+    private static let maxLyricsSize   = 5 * 1024 * 1024   // 5 MB
+    private static let maxArtworkSize  = 25 * 1024 * 1024  // 25 MB
+    private static let maxAudioSize    = 250 * 1024 * 1024 // 250 MB
+    
     // MARK: - Unpacking
     
-    /// Fully unpacks a .sonorist container, decompressing the audio into memory
+    /// Fully unpacks a .sonorist container, decompressing the audio into memory with strict bounds & memory limits
     public static func unpack(data: Data) throws -> SonoristBundle {
         var offset = 0
         
@@ -103,30 +109,47 @@ public enum SonoristBundleEngine {
         offset += 2
         
         // Metadata
+        guard offset + 4 <= data.count else { throw NSError(domain: "SonoristBundleEngine", code: 403, userInfo: [NSLocalizedDescriptionKey: "Malformed bundle: truncated metadata header."]) }
         let metaLen: UInt32 = data.subdata(in: offset..<(offset + 4)).withUnsafeBytes { $0.load(as: UInt32.self) }.littleEndian
         offset += 4
+        guard metaLen <= maxMetadataSize, offset + Int(metaLen) <= data.count else {
+            throw NSError(domain: "SonoristBundleEngine", code: 404, userInfo: [NSLocalizedDescriptionKey: "Malformed bundle: metadata out of bounds or exceeding memory safety limit."])
+        }
         let metaData = data.subdata(in: offset..<(offset + Int(metaLen)))
         let track = try JSONDecoder().decode(Track.self, from: metaData)
         offset += Int(metaLen)
         
         // Lyrics
+        guard offset + 4 <= data.count else { throw NSError(domain: "SonoristBundleEngine", code: 405, userInfo: [NSLocalizedDescriptionKey: "Malformed bundle: truncated lyrics header."]) }
         let lyricsLen: UInt32 = data.subdata(in: offset..<(offset + 4)).withUnsafeBytes { $0.load(as: UInt32.self) }.littleEndian
         offset += 4
+        guard lyricsLen <= maxLyricsSize, offset + Int(lyricsLen) <= data.count else {
+            throw NSError(domain: "SonoristBundleEngine", code: 406, userInfo: [NSLocalizedDescriptionKey: "Malformed bundle: lyrics out of bounds."])
+        }
         let lyricsData = data.subdata(in: offset..<(offset + Int(lyricsLen)))
         let decodedLyrics: [LyricLine] = (try? JSONDecoder().decode([LyricLine].self, from: lyricsData)) ?? []
         offset += Int(lyricsLen)
         
         // Artwork
+        guard offset + 4 <= data.count else { throw NSError(domain: "SonoristBundleEngine", code: 407, userInfo: [NSLocalizedDescriptionKey: "Malformed bundle: truncated artwork header."]) }
         let artLen: UInt32 = data.subdata(in: offset..<(offset + 4)).withUnsafeBytes { $0.load(as: UInt32.self) }.littleEndian
         offset += 4
+        guard artLen <= maxArtworkSize, offset + Int(artLen) <= data.count else {
+            throw NSError(domain: "SonoristBundleEngine", code: 408, userInfo: [NSLocalizedDescriptionKey: "Malformed bundle: artwork out of bounds."])
+        }
         let artworkData = artLen > 0 ? data.subdata(in: offset..<(offset + Int(artLen))) : nil
         offset += Int(artLen)
         
         // Audio
+        guard offset + 8 <= data.count else { throw NSError(domain: "SonoristBundleEngine", code: 409, userInfo: [NSLocalizedDescriptionKey: "Malformed bundle: truncated audio header."]) }
         let rawAudioSize: UInt32 = data.subdata(in: offset..<(offset + 4)).withUnsafeBytes { $0.load(as: UInt32.self) }.littleEndian
         offset += 4
         let compAudioSize: UInt32 = data.subdata(in: offset..<(offset + 4)).withUnsafeBytes { $0.load(as: UInt32.self) }.littleEndian
         offset += 4
+        
+        guard rawAudioSize <= maxAudioSize, compAudioSize <= maxAudioSize, offset + Int(compAudioSize) <= data.count else {
+            throw NSError(domain: "SonoristBundleEngine", code: 410, userInfo: [NSLocalizedDescriptionKey: "Malformed bundle: audio stream out of bounds or exceeding maximum allocation."])
+        }
         
         let compressedAudioData = data.subdata(in: offset..<(offset + Int(compAudioSize)))
         let decompressedAudio = decompressLZFSE(data: compressedAudioData, uncompressedSize: Int(rawAudioSize)) ?? compressedAudioData
@@ -156,22 +179,34 @@ public enum SonoristBundleEngine {
         var offset = 10 // Magic (8) + Version (2)
         
         // Metadata
+        guard offset + 4 <= data.count else { throw NSError(domain: "SonoristBundleEngine", code: 403, userInfo: [NSLocalizedDescriptionKey: "Corrupted metadata header."]) }
         let metaLen: UInt32 = data.subdata(in: offset..<(offset + 4)).withUnsafeBytes { $0.load(as: UInt32.self) }.littleEndian
         offset += 4
+        guard metaLen <= maxMetadataSize, offset + Int(metaLen) <= data.count else {
+            throw NSError(domain: "SonoristBundleEngine", code: 404, userInfo: [NSLocalizedDescriptionKey: "Corrupted metadata payload."])
+        }
         let metaData = data.subdata(in: offset..<(offset + Int(metaLen)))
         let track = try JSONDecoder().decode(Track.self, from: metaData)
         offset += Int(metaLen)
         
         // Lyrics
+        guard offset + 4 <= data.count else { throw NSError(domain: "SonoristBundleEngine", code: 405, userInfo: [NSLocalizedDescriptionKey: "Corrupted lyrics header."]) }
         let lyricsLen: UInt32 = data.subdata(in: offset..<(offset + 4)).withUnsafeBytes { $0.load(as: UInt32.self) }.littleEndian
         offset += 4
+        guard lyricsLen <= maxLyricsSize, offset + Int(lyricsLen) <= data.count else {
+            throw NSError(domain: "SonoristBundleEngine", code: 406, userInfo: [NSLocalizedDescriptionKey: "Corrupted lyrics payload."])
+        }
         let lyricsData = data.subdata(in: offset..<(offset + Int(lyricsLen)))
         let decodedLyrics: [LyricLine] = (try? JSONDecoder().decode([LyricLine].self, from: lyricsData)) ?? []
         offset += Int(lyricsLen)
         
         // Artwork
+        guard offset + 4 <= data.count else { throw NSError(domain: "SonoristBundleEngine", code: 407, userInfo: [NSLocalizedDescriptionKey: "Corrupted artwork header."]) }
         let artLen: UInt32 = data.subdata(in: offset..<(offset + 4)).withUnsafeBytes { $0.load(as: UInt32.self) }.littleEndian
         offset += 4
+        guard artLen <= maxArtworkSize, offset + Int(artLen) <= data.count else {
+            throw NSError(domain: "SonoristBundleEngine", code: 408, userInfo: [NSLocalizedDescriptionKey: "Corrupted artwork payload."])
+        }
         let artworkData = artLen > 0 ? data.subdata(in: offset..<(offset + Int(artLen))) : nil
         
         return (track, decodedLyrics, artworkData)
@@ -203,9 +238,9 @@ public enum SonoristBundleEngine {
         return Data(bytes: destinationBuffer, count: compressedSize)
     }
     
-    /// Decompresses an LZFSE buffer into memory
+    /// Decompresses an LZFSE buffer into memory with strict anti-OOM safety bounds
     public static func decompressLZFSE(data: Data, uncompressedSize: Int) -> Data? {
-        guard !data.isEmpty, uncompressedSize > 0 else { return Data() }
+        guard !data.isEmpty, uncompressedSize > 0, uncompressedSize <= maxAudioSize else { return Data() }
         
         let destinationBuffer = UnsafeMutablePointer<UInt8>.allocate(capacity: uncompressedSize)
         defer { destinationBuffer.deallocate() }

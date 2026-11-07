@@ -1,0 +1,363 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		052CA0581557479A8619E97F /* MobileHaptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDB06196EE2A4B61890FE440 /* MobileHaptics.swift */; };
+		0C2199D6C1A543228C3B777D /* MobileMiniPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C98C1DF70569448FB04D6680 /* MobileMiniPlayerView.swift */; };
+		1115D8F9BA1341E697BA2FA5 /* AudioPlayerEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDE0AD9B326B4220BEB62EE1 /* AudioPlayerEngine.swift */; };
+		17961E05EEBD49CB815FADFD /* iOSAudioSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD85366C8C54445994E14424 /* iOSAudioSession.swift */; };
+		2B3895B3AF7C40C882C38E3F /* MobileSearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10D4351882CE4774B4FBC0B6 /* MobileSearchView.swift */; };
+		443F4E68F83B4CC6807284CD /* ListeningAnalyticsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = E49E0C80E1C54135906FFC32 /* ListeningAnalyticsManager.swift */; };
+		46AA5C294F6A4FF7A90BAB18 /* MobileTabBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32004935B3C64A34864312D4 /* MobileTabBarView.swift */; };
+		4A3AA759D9DF44A38307048C /* SecurityAudit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FB9487BB0B345E39AE05544 /* SecurityAudit.swift */; };
+		5E9A0AD6200549809DAED5D1 /* InnerTubeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 623291A693994CC1A0BC612F /* InnerTubeClient.swift */; };
+		6B18BE63FC1D49D2A1CC50C8 /* AppThemeManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B68FA81671704BE3B50BC70E /* AppThemeManager.swift */; };
+		73BEAF04D5BE44308D65A510 /* MobileAnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D601584072E41FA8BB1C638 /* MobileAnalyticsView.swift */; };
+		76EBFD1E2047452E8B55881C /* SonoristBundleEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CFE560ADBA84C7DBCCE8A7C /* SonoristBundleEngine.swift */; };
+		7774AF67184C4C2A8281F029 /* InnerTubeModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEC822E983E24ED49BBFE178 /* InnerTubeModels.swift */; };
+		7DA82F232B2F49AFACE42393 /* FluidTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1E2A5D6260E4BEE9D918143 /* FluidTheme.swift */; };
+		91C5D7B857784778BA82A5AC /* MediaCacheManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5781E9EDF4F04EC6B3420F68 /* MediaCacheManager.swift */; };
+		9229C3C8249F405A86020B73 /* LocalMusicManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60954CC553FC49E599A60B5F /* LocalMusicManager.swift */; };
+		94ABFEF3D6BF4A85ADD48505 /* YouTubeCipherEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2A9AC30D9EC409E958AB185 /* YouTubeCipherEngine.swift */; };
+		A37B827CAD2C4AE1A7226F89 /* MobileLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DC3F846A5914623A3BAE462 /* MobileLibraryView.swift */; };
+		CAF234D547D04B55B8228DA8 /* SonoristiOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75C0B080C25D401DBF84D6FE /* SonoristiOSApp.swift */; };
+		E11372D7182240508F6CB2C0 /* LRCLIBService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A08CD222D8A48DE966BD946 /* LRCLIBService.swift */; };
+		F780AEF2F37F40EA9CDEE60D /* MobileRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1D1CC4456814BE4A4205EB2 /* MobileRootView.swift */; };
+		FAC8BCFC6DFB47C8974F312F /* MobileNowPlayingSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EEA71EBC4074E9A87864931 /* MobileNowPlayingSheet.swift */; };
+		E9B8A0012C12345678901234 /* MobileSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9B8A0022C12345678901234 /* MobileSettingsView.swift */; };
+		E9B8A0032C12345678901234 /* Settings.bundle in Resources */ = {isa = PBXBuildFile; fileRef = E9B8A0042C12345678901234 /* Settings.bundle */; };
+		E9B8A0052C12345678901234 /* MobileSleepTimerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9B8A0062C12345678901234 /* MobileSleepTimerSheet.swift */; };
+		E9B8A0072C12345678901234 /* MobileEqualizerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9B8A0082C12345678901234 /* MobileEqualizerSheet.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		10D4351882CE4774B4FBC0B6 /* MobileSearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MobileSearchView.swift; path = UI/MobileSearchView.swift; sourceTree = "<group>"; };
+		32004935B3C64A34864312D4 /* MobileTabBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MobileTabBarView.swift; path = UI/MobileTabBarView.swift; sourceTree = "<group>"; };
+		3D601584072E41FA8BB1C638 /* MobileAnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MobileAnalyticsView.swift; path = UI/MobileAnalyticsView.swift; sourceTree = "<group>"; };
+		E9B8A0022C12345678901234 /* MobileSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MobileSettingsView.swift; path = UI/MobileSettingsView.swift; sourceTree = "<group>"; };
+		E9B8A0042C12345678901234 /* Settings.bundle */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.plug-in"; path = Settings.bundle; sourceTree = "<group>"; };
+		E9B8A0062C12345678901234 /* MobileSleepTimerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MobileSleepTimerSheet.swift; path = UI/Components/MobileSleepTimerSheet.swift; sourceTree = "<group>"; };
+		E9B8A0082C12345678901234 /* MobileEqualizerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MobileEqualizerSheet.swift; path = UI/Components/MobileEqualizerSheet.swift; sourceTree = "<group>"; };
+		3F86707E888443D1B3F19696 /* SonoristMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SonoristMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		3FB9487BB0B345E39AE05544 /* SecurityAudit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SecurityAudit.swift; path = ../Sources/Sonorist/Core/Security/SecurityAudit.swift; sourceTree = "<group>"; };
+		4EEA71EBC4074E9A87864931 /* MobileNowPlayingSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MobileNowPlayingSheet.swift; path = UI/MobileNowPlayingSheet.swift; sourceTree = "<group>"; };
+		5781E9EDF4F04EC6B3420F68 /* MediaCacheManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MediaCacheManager.swift; path = ../Sources/Sonorist/Core/Cache/MediaCacheManager.swift; sourceTree = "<group>"; };
+		60954CC553FC49E599A60B5F /* LocalMusicManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LocalMusicManager.swift; path = ../Sources/Sonorist/Core/LocalMusic/LocalMusicManager.swift; sourceTree = "<group>"; };
+		623291A693994CC1A0BC612F /* InnerTubeClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = InnerTubeClient.swift; path = ../Sources/Sonorist/Core/InnerTube/InnerTubeClient.swift; sourceTree = "<group>"; };
+		6CFE560ADBA84C7DBCCE8A7C /* SonoristBundleEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SonoristBundleEngine.swift; path = ../Sources/Sonorist/Core/Cache/SonoristBundleEngine.swift; sourceTree = "<group>"; };
+		6DC3F846A5914623A3BAE462 /* MobileLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MobileLibraryView.swift; path = UI/MobileLibraryView.swift; sourceTree = "<group>"; };
+		75C0B080C25D401DBF84D6FE /* SonoristiOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SonoristiOSApp.swift; path = App/SonoristiOSApp.swift; sourceTree = "<group>"; };
+		7A08CD222D8A48DE966BD946 /* LRCLIBService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LRCLIBService.swift; path = ../Sources/Sonorist/Core/Lyrics/LRCLIBService.swift; sourceTree = "<group>"; };
+		93B8A9BB74AF4CF4B865B479 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Info.plist; sourceTree = "<group>"; };
+		B2A9AC30D9EC409E958AB185 /* YouTubeCipherEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = YouTubeCipherEngine.swift; path = ../Sources/Sonorist/Core/Cipher/YouTubeCipherEngine.swift; sourceTree = "<group>"; };
+		B68FA81671704BE3B50BC70E /* AppThemeManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppThemeManager.swift; path = ../Sources/Sonorist/UI/DesignSystem/AppThemeManager.swift; sourceTree = "<group>"; };
+		BDB06196EE2A4B61890FE440 /* MobileHaptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MobileHaptics.swift; path = Adapters/MobileHaptics.swift; sourceTree = "<group>"; };
+		C98C1DF70569448FB04D6680 /* MobileMiniPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MobileMiniPlayerView.swift; path = UI/MobileMiniPlayerView.swift; sourceTree = "<group>"; };
+		DD85366C8C54445994E14424 /* iOSAudioSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = iOSAudioSession.swift; path = Adapters/iOSAudioSession.swift; sourceTree = "<group>"; };
+		DDE0AD9B326B4220BEB62EE1 /* AudioPlayerEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AudioPlayerEngine.swift; path = ../Sources/Sonorist/Core/Audio/AudioPlayerEngine.swift; sourceTree = "<group>"; };
+		E1D1CC4456814BE4A4205EB2 /* MobileRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MobileRootView.swift; path = UI/MobileRootView.swift; sourceTree = "<group>"; };
+		E1E2A5D6260E4BEE9D918143 /* FluidTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = FluidTheme.swift; path = ../Sources/Sonorist/UI/DesignSystem/FluidTheme.swift; sourceTree = "<group>"; };
+		E49E0C80E1C54135906FFC32 /* ListeningAnalyticsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ListeningAnalyticsManager.swift; path = ../Sources/Sonorist/Core/Analytics/ListeningAnalyticsManager.swift; sourceTree = "<group>"; };
+		EEC822E983E24ED49BBFE178 /* InnerTubeModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = InnerTubeModels.swift; path = ../Sources/Sonorist/Core/InnerTube/InnerTubeModels.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		7C4DD649E7BE434084C7A7FA /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		34377290BC724CBB91AFA2BF /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				3F86707E888443D1B3F19696 /* SonoristMobile.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		49CD174D0B6F43B5907DE402 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				7A08CD222D8A48DE966BD946 /* LRCLIBService.swift */,
+				60954CC553FC49E599A60B5F /* LocalMusicManager.swift */,
+				6CFE560ADBA84C7DBCCE8A7C /* SonoristBundleEngine.swift */,
+				5781E9EDF4F04EC6B3420F68 /* MediaCacheManager.swift */,
+				3FB9487BB0B345E39AE05544 /* SecurityAudit.swift */,
+				EEC822E983E24ED49BBFE178 /* InnerTubeModels.swift */,
+				623291A693994CC1A0BC612F /* InnerTubeClient.swift */,
+				B2A9AC30D9EC409E958AB185 /* YouTubeCipherEngine.swift */,
+				DDE0AD9B326B4220BEB62EE1 /* AudioPlayerEngine.swift */,
+				E49E0C80E1C54135906FFC32 /* ListeningAnalyticsManager.swift */,
+				E1E2A5D6260E4BEE9D918143 /* FluidTheme.swift */,
+				B68FA81671704BE3B50BC70E /* AppThemeManager.swift */,
+				75C0B080C25D401DBF84D6FE /* SonoristiOSApp.swift */,
+				DD85366C8C54445994E14424 /* iOSAudioSession.swift */,
+				BDB06196EE2A4B61890FE440 /* MobileHaptics.swift */,
+				6DC3F846A5914623A3BAE462 /* MobileLibraryView.swift */,
+				4EEA71EBC4074E9A87864931 /* MobileNowPlayingSheet.swift */,
+				10D4351882CE4774B4FBC0B6 /* MobileSearchView.swift */,
+				E1D1CC4456814BE4A4205EB2 /* MobileRootView.swift */,
+				C98C1DF70569448FB04D6680 /* MobileMiniPlayerView.swift */,
+				32004935B3C64A34864312D4 /* MobileTabBarView.swift */,
+				3D601584072E41FA8BB1C638 /* MobileAnalyticsView.swift */,
+				E9B8A0022C12345678901234 /* MobileSettingsView.swift */,
+				E9B8A0062C12345678901234 /* MobileSleepTimerSheet.swift */,
+				E9B8A0082C12345678901234 /* MobileEqualizerSheet.swift */,
+			);
+			name = Sources;
+			sourceTree = "<group>";
+		};
+		F4419903CF2A4687BCCE1C19 = {
+			isa = PBXGroup;
+			children = (
+				49CD174D0B6F43B5907DE402 /* Sources */,
+				34377290BC724CBB91AFA2BF /* Products */,
+				93B8A9BB74AF4CF4B865B479 /* Info.plist */,
+				E9B8A0042C12345678901234 /* Settings.bundle */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		D1291ADE2DDF4E79B323947C /* SonoristMobile */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 3589C403DB4341D9976D4ACC /* Build configuration list for PBXNativeTarget "SonoristMobile" */;
+			buildPhases = (
+				4AF9A681ECA54D02AD7939EC /* Sources */,
+				7C4DD649E7BE434084C7A7FA /* Frameworks */,
+				523BF55355CD412F831E1D20 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = SonoristMobile;
+			productName = Sonorist;
+			productReference = 3F86707E888443D1B3F19696 /* SonoristMobile.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		F6763FEE2D794394A49D26F3 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					D1291ADE2DDF4E79B323947C = {
+						CreatedOnToolsVersion = 15.0;
+					};
+				};
+			};
+			buildConfigurationList = 44BA5DCD1D2B4E4D91A5BBE8 /* Build configuration list for PBXProject "SonoristMobile" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = F4419903CF2A4687BCCE1C19;
+			productRefGroup = 34377290BC724CBB91AFA2BF /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				D1291ADE2DDF4E79B323947C /* SonoristMobile */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		523BF55355CD412F831E1D20 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E9B8A0032C12345678901234 /* Settings.bundle in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		4AF9A681ECA54D02AD7939EC /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E11372D7182240508F6CB2C0 /* LRCLIBService.swift in Sources */,
+				9229C3C8249F405A86020B73 /* LocalMusicManager.swift in Sources */,
+				76EBFD1E2047452E8B55881C /* SonoristBundleEngine.swift in Sources */,
+				91C5D7B857784778BA82A5AC /* MediaCacheManager.swift in Sources */,
+				4A3AA759D9DF44A38307048C /* SecurityAudit.swift in Sources */,
+				7774AF67184C4C2A8281F029 /* InnerTubeModels.swift in Sources */,
+				5E9A0AD6200549809DAED5D1 /* InnerTubeClient.swift in Sources */,
+				94ABFEF3D6BF4A85ADD48505 /* YouTubeCipherEngine.swift in Sources */,
+				1115D8F9BA1341E697BA2FA5 /* AudioPlayerEngine.swift in Sources */,
+				443F4E68F83B4CC6807284CD /* ListeningAnalyticsManager.swift in Sources */,
+				7DA82F232B2F49AFACE42393 /* FluidTheme.swift in Sources */,
+				6B18BE63FC1D49D2A1CC50C8 /* AppThemeManager.swift in Sources */,
+				CAF234D547D04B55B8228DA8 /* SonoristiOSApp.swift in Sources */,
+				17961E05EEBD49CB815FADFD /* iOSAudioSession.swift in Sources */,
+				052CA0581557479A8619E97F /* MobileHaptics.swift in Sources */,
+				A37B827CAD2C4AE1A7226F89 /* MobileLibraryView.swift in Sources */,
+				FAC8BCFC6DFB47C8974F312F /* MobileNowPlayingSheet.swift in Sources */,
+				2B3895B3AF7C40C882C38E3F /* MobileSearchView.swift in Sources */,
+				F780AEF2F37F40EA9CDEE60D /* MobileRootView.swift in Sources */,
+				0C2199D6C1A543228C3B777D /* MobileMiniPlayerView.swift in Sources */,
+				46AA5C294F6A4FF7A90BAB18 /* MobileTabBarView.swift in Sources */,
+				73BEAF04D5BE44308D65A510 /* MobileAnalyticsView.swift in Sources */,
+				E9B8A0012C12345678901234 /* MobileSettingsView.swift in Sources */,
+				E9B8A0052C12345678901234 /* MobileSleepTimerSheet.swift in Sources */,
+				E9B8A0072C12345678901234 /* MobileEqualizerSheet.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		50E3606D3DFD4AC68D2FC837 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				"CODE_SIGNING_ALLOWED[sdk=iphonesimulator*]" = YES;
+				"CODE_SIGNING_REQUIRED[sdk=iphonesimulator*]" = NO;
+				"CODE_SIGN_IDENTITY[sdk=iphonesimulator*]" = "-";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = LLNB56P54D;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Sonorist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 2.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sonorist.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		5B6726CDF46D4BB8A2866D8C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				"CODE_SIGNING_ALLOWED[sdk=iphonesimulator*]" = YES;
+				"CODE_SIGNING_REQUIRED[sdk=iphonesimulator*]" = NO;
+				"CODE_SIGN_IDENTITY[sdk=iphonesimulator*]" = "-";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = LLNB56P54D;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Sonorist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 2.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sonorist.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		5E4A78E106E0434CA7D5775F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_OPTIMIZATION_LEVEL = s;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		940DDD2E75934A40B5134C8C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		3589C403DB4341D9976D4ACC /* Build configuration list for PBXNativeTarget "SonoristMobile" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				50E3606D3DFD4AC68D2FC837 /* Debug */,
+				5B6726CDF46D4BB8A2866D8C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		44BA5DCD1D2B4E4D91A5BBE8 /* Build configuration list for PBXProject "SonoristMobile" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				940DDD2E75934A40B5134C8C /* Debug */,
+				5E4A78E106E0434CA7D5775F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = F6763FEE2D794394A49D26F3 /* Project object */;
+}

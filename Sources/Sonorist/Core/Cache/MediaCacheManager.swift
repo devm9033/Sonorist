@@ -1,5 +1,7 @@
 import Foundation
+#if os(macOS)
 import AppKit
+#endif
 import AVFoundation
 import CoreMedia
 
@@ -15,6 +17,7 @@ public final class MediaCacheManager: @unchecked Sendable {
     public let exportsDirectory: URL
     public let historyDirectory: URL
     public let playbackTempDirectory: URL
+    public let artworkDirectory: URL
     
     private let manifestURL: URL
     private let queue = DispatchQueue(label: "com.sonorist.mac.cache", qos: .utility)
@@ -25,14 +28,15 @@ public final class MediaCacheManager: @unchecked Sendable {
     
     public init() {
         // Preferred: Sandboxed Application Support directory
-        let defaultAppSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let appFolder = defaultAppSupport.appendingPathComponent("Sonorist", isDirectory: true)
+        let defaultAppSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+        let appFolder = defaultAppSupport?.appendingPathComponent("Sonorist", isDirectory: true)
         
         // Defensive fallback: If Application Support is restricted in sandbox, use /tmp/Sonorist
         let baseDir: URL
-        if (try? fileManager.createDirectory(at: appFolder, withIntermediateDirectories: true)) != nil &&
-           fileManager.isWritableFile(atPath: appFolder.path) {
-            baseDir = appFolder
+        if let folder = appFolder,
+           (try? fileManager.createDirectory(at: folder, withIntermediateDirectories: true)) != nil &&
+           fileManager.isWritableFile(atPath: folder.path) {
+            baseDir = folder
         } else {
             baseDir = URL(fileURLWithPath: "/tmp/Sonorist", isDirectory: true)
             try? fileManager.createDirectory(at: baseDir, withIntermediateDirectories: true)
@@ -42,24 +46,39 @@ public final class MediaCacheManager: @unchecked Sendable {
         self.libraryDirectory = baseDir.appendingPathComponent("Library", isDirectory: true)
         self.exportsDirectory = baseDir.appendingPathComponent("Exports", isDirectory: true)
         self.historyDirectory = baseDir.appendingPathComponent("History", isDirectory: true)
-        self.playbackTempDirectory = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("SonoristPlayback", isDirectory: true)
+        self.artworkDirectory = baseDir.appendingPathComponent("ArtworkCache", isDirectory: true)
+        self.playbackTempDirectory = URL(fileURLWithPath: "/tmp/SonoristPlayback", isDirectory: true)
         self.manifestURL = libraryDirectory.appendingPathComponent("library_manifest.json")
         
         setupDirectories()
         migrateLegacyCacheIfNeeded()
         loadManifest()
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            _ = self?.getAllCachedTracks()
+        }
     }
     
-    private func setupDirectories() {
-        try? fileManager.createDirectory(at: libraryDirectory, withIntermediateDirectories: true)
-        try? fileManager.createDirectory(at: exportsDirectory, withIntermediateDirectories: true)
-        try? fileManager.createDirectory(at: historyDirectory, withIntermediateDirectories: true)
-        try? fileManager.createDirectory(at: playbackTempDirectory, withIntermediateDirectories: true)
+    private var didSetupDirectories = false
+    public func setupDirectories(force: Bool = false) {
+        if !force && didSetupDirectories { return }
+        didSetupDirectories = true
+        let dirs = [parentDirectory, libraryDirectory, exportsDirectory, historyDirectory, artworkDirectory, playbackTempDirectory]
+        for dir in dirs {
+            if !fileManager.fileExists(atPath: dir.path) {
+                try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+            }
+        }
+        
+        // Exclude media library cache from iCloud backup per Apple App Store Guideline 5.1.1
+        var resourceValues = URLResourceValues()
+        resourceValues.isExcludedFromBackup = true
+        var mutableParent = parentDirectory
+        try? mutableParent.setResourceValues(resourceValues)
     }
     
     private func migrateLegacyCacheIfNeeded() {
         // Automatically migrate any legacy MetrolistMac cache files
-        let defaultAppSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        guard let defaultAppSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return }
         let legacyFolder = defaultAppSupport.appendingPathComponent("MetrolistMac")
         let legacyAudioCache = legacyFolder.appendingPathComponent("AudioCache")
         
@@ -104,28 +123,75 @@ public final class MediaCacheManager: @unchecked Sendable {
     
     // MARK: - Query & Lookup
     
-    /// Checks if a track is available offline (instant zero-IO lookup)
+    /// Checks if a track is available offline (instant zero-IO lookup with disk fallback)
     public func isCached(videoId: String) -> Bool {
         return queue.sync {
-            return cachedIdsSet.contains(videoId)
+            if cachedIdsSet.contains(videoId) { return true }
+            let candidate = "\(videoId).sonorist"
+            if fileManager.fileExists(atPath: libraryDirectory.appendingPathComponent(candidate).path) {
+                cachedManifest[videoId] = candidate
+                cachedIdsSet.insert(videoId)
+                return true
+            }
+            return false
         }
     }
     
     /// Returns the local bundle file URL if cached
     public func cachedURL(for videoId: String) -> URL? {
         return queue.sync {
-            guard let filename = cachedManifest[videoId] else { return nil }
+            let filename = cachedManifest[videoId] ?? "\(videoId).sonorist"
             let fileURL = libraryDirectory.appendingPathComponent(filename)
-            return fileManager.fileExists(atPath: fileURL.path) ? fileURL : nil
+            if fileManager.fileExists(atPath: fileURL.path) {
+                if cachedManifest[videoId] == nil {
+                    cachedManifest[videoId] = filename
+                    cachedIdsSet.insert(videoId)
+                }
+                return fileURL
+            }
+            return nil
         }
+    }
+    
+    /// Returns a local file:// URL pointing to the high-res extracted artwork on disk
+    public func cachedArtworkURL(for videoId: String) -> URL? {
+        return queue.sync {
+            internalCachedArtworkURL(for: videoId)
+        }
+    }
+    
+    /// Un-synchronized internal helper to prevent GCD recursive dispatch deadlock
+    private func internalCachedArtworkURL(for videoId: String) -> URL? {
+        let artFileURL = self.artworkDirectory.appendingPathComponent("\(videoId).jpg")
+        if fileManager.fileExists(atPath: artFileURL.path) {
+            return artFileURL
+        }
+        
+        // If not yet extracted on disk, extract once from the .sonorist binary container
+        let filename = cachedManifest[videoId] ?? "\(videoId).sonorist"
+        let bundleURL = libraryDirectory.appendingPathComponent(filename)
+        guard fileManager.fileExists(atPath: bundleURL.path),
+              let data = try? Data(contentsOf: bundleURL),
+              let meta = try? SonoristBundleEngine.readMetadataOnly(from: data),
+              let artData = meta.artworkData, !artData.isEmpty else {
+            return nil
+        }
+        
+        try? artData.write(to: artFileURL, options: .atomic)
+        return fileManager.fileExists(atPath: artFileURL.path) ? artFileURL : nil
     }
     
     /// Prepares real-time in-memory playback for a .sonorist bundle
     public func preparePlaybackStream(for videoId: String) -> URL? {
         return queue.sync {
-            guard let filename = cachedManifest[videoId] else { return nil }
+            let filename = cachedManifest[videoId] ?? "\(videoId).sonorist"
             let bundleURL = libraryDirectory.appendingPathComponent(filename)
             guard fileManager.fileExists(atPath: bundleURL.path) else { return nil }
+            
+            if cachedManifest[videoId] == nil {
+                cachedManifest[videoId] = filename
+                cachedIdsSet.insert(videoId)
+            }
             
             // Ensure temp directory exists
             try? fileManager.createDirectory(at: playbackTempDirectory, withIntermediateDirectories: true)
@@ -175,16 +241,17 @@ public final class MediaCacheManager: @unchecked Sendable {
     /// Retrieves cached lyrics from the .sonorist bundle in O(1) time
     public func getCachedLyrics(for videoId: String) -> [LyricLine]? {
         return queue.sync {
-            guard let filename = cachedManifest[videoId], filename.hasSuffix(".sonorist") else { return nil }
+            let filename = cachedManifest[videoId] ?? "\(videoId).sonorist"
             let bundleURL = libraryDirectory.appendingPathComponent(filename)
-            guard let data = try? Data(contentsOf: bundleURL),
+            guard fileManager.fileExists(atPath: bundleURL.path),
+                  let data = try? Data(contentsOf: bundleURL),
                   let meta = try? SonoristBundleEngine.readMetadataOnly(from: data),
                   !meta.lyrics.isEmpty else { return nil }
             return meta.lyrics
         }
     }
     
-    /// Returns all saved offline tracks from the compressed library
+    /// Returns all saved offline tracks from the compressed library (instant O(1) in-memory fast-path)
     public func getAllCachedTracks() -> [Track] {
         return queue.sync {
             var valid: [Track] = []
@@ -192,28 +259,47 @@ public final class MediaCacheManager: @unchecked Sendable {
                 let fileURL = libraryDirectory.appendingPathComponent(filename)
                 guard fileManager.fileExists(atPath: fileURL.path) else { continue }
                 
-                // If it's a .sonorist bundle, read metadata in O(1) without decompressing audio
+                // 1. Instant in-memory fast-path: zero disk I/O
+                if let track = cachedTracksMetadata[vid] {
+                    var t = track
+                    t.isCached = true
+                    t.streamURL = nil
+                    let artFileURL = self.artworkDirectory.appendingPathComponent("\(vid).jpg")
+                    if fileManager.fileExists(atPath: artFileURL.path) {
+                        t.artworkURL = artFileURL
+                    }
+                    valid.append(t)
+                    continue
+                }
+                
+                // 2. Slow-path (first run cold read only): parse metadata once and cache in RAM
                 if filename.hasSuffix(".sonorist") {
                     if let data = try? Data(contentsOf: fileURL),
                        let meta = try? SonoristBundleEngine.readMetadataOnly(from: data) {
                         var t = meta.track
                         t.isCached = true
                         t.streamURL = nil // Never set streamURL to the raw .sonorist bundle file
+                        
+                        // Extract and link local file artwork for flawless offline display
+                        let artFileURL = self.artworkDirectory.appendingPathComponent("\(vid).jpg")
+                        if fileManager.fileExists(atPath: artFileURL.path) {
+                            t.artworkURL = artFileURL
+                        } else if let artData = meta.artworkData, !artData.isEmpty {
+                            try? artData.write(to: artFileURL, options: .atomic)
+                            if fileManager.fileExists(atPath: artFileURL.path) {
+                                t.artworkURL = artFileURL
+                            }
+                        }
+                        
                         valid.append(t)
                         self.cachedTracksMetadata[vid] = t
                         continue
                     }
                 }
-                
-                // Fallback to in-memory metadata
-                if let track = cachedTracksMetadata[vid] {
-                    var t = track
-                    t.isCached = true
-                    t.streamURL = nil // Never set streamURL to the raw .sonorist bundle file
-                    valid.append(t)
-                }
             }
-            return valid
+            return valid.sorted { t1, t2 in
+                t1.title.localizedCaseInsensitiveCompare(t2.title) == .orderedAscending
+            }
         }
     }
     
@@ -228,6 +314,7 @@ public final class MediaCacheManager: @unchecked Sendable {
     ) {
         queue.sync {
             setupDirectories()
+            pruneCacheIfNeeded(incomingBytes: Int64(audioData.count))
             do {
                 let bundleData = try SonoristBundleEngine.pack(
                     track: track,
@@ -236,15 +323,26 @@ public final class MediaCacheManager: @unchecked Sendable {
                     artworkData: artworkData
                 )
                 
-                let filename = "\(track.id).sonorist"
+                let safeId = track.id.filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
+                guard !safeId.isEmpty else { return }
+                let filename = "\(safeId).sonorist"
                 let destURL = self.libraryDirectory.appendingPathComponent(filename)
                 try bundleData.write(to: destURL, options: .atomic)
                 
-                self.cachedManifest[track.id] = filename
-                self.cachedIdsSet.insert(track.id)
+                // Cache artwork to local file for instant offline image loading
+                if let art = artworkData, !art.isEmpty {
+                    let artFileURL = self.artworkDirectory.appendingPathComponent("\(safeId).jpg")
+                    try? art.write(to: artFileURL, options: .atomic)
+                }
+                
+                self.cachedManifest[safeId] = filename
+                self.cachedIdsSet.insert(safeId)
                 var t = track
                 t.isCached = true
-                self.cachedTracksMetadata[track.id] = t
+                if let localArt = internalCachedArtworkURL(for: safeId) {
+                    t.artworkURL = localArt
+                }
+                self.cachedTracksMetadata[safeId] = t
                 self.saveManifest()
             } catch {
                 #if DEBUG
@@ -417,7 +515,11 @@ public final class MediaCacheManager: @unchecked Sendable {
                     track = meta ?? Track(id: vid, title: vid, artist: "Unknown", audioFormat: "AAC")
                     lyrics = []
                     artworkData = nil
-                    trackName = meta != nil ? "\(meta!.artist) - \(meta!.title)" : vid
+                    if let meta = meta {
+                        trackName = "\(meta.artist) - \(meta.title)"
+                    } else {
+                        trackName = vid
+                    }
                 }
                 
                 // Sanitize file name for filesystem
@@ -445,18 +547,27 @@ public final class MediaCacheManager: @unchecked Sendable {
     
     /// Removes a single track from the offline library
     public func removeCachedTrack(videoId: String) {
+        let safeId = videoId.filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
+        guard !safeId.isEmpty else { return }
         queue.sync {
-            if let filename = self.cachedManifest[videoId] {
+            if let filename = self.cachedManifest[safeId] {
                 let fileURL = self.libraryDirectory.appendingPathComponent(filename)
                 try? self.fileManager.removeItem(at: fileURL)
-                self.cachedManifest.removeValue(forKey: videoId)
-                self.cachedIdsSet.remove(videoId)
-                self.cachedTracksMetadata.removeValue(forKey: videoId)
+                self.cachedManifest.removeValue(forKey: safeId)
+                self.cachedIdsSet.remove(safeId)
+                self.cachedTracksMetadata.removeValue(forKey: safeId)
                 self.saveManifest()
             }
-            // Also clean up transient playback file if any
-            let tempFile = self.playbackTempDirectory.appendingPathComponent("\(videoId).m4a")
+            // Clean up transient playback file if any
+            let tempFile = self.playbackTempDirectory.appendingPathComponent("\(safeId).m4a")
             try? self.fileManager.removeItem(at: tempFile)
+            
+            // Clean up extracted artwork
+            let artFile = self.artworkDirectory.appendingPathComponent("\(safeId).jpg")
+            try? self.fileManager.removeItem(at: artFile)
+        }
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: AudioPlayerEngine.trackDidCacheNotification, object: safeId)
         }
     }
     
@@ -465,12 +576,78 @@ public final class MediaCacheManager: @unchecked Sendable {
         queue.sync {
             try? self.fileManager.removeItem(at: self.libraryDirectory)
             try? self.fileManager.removeItem(at: self.playbackTempDirectory)
+            try? self.fileManager.removeItem(at: self.artworkDirectory)
             self.cachedManifest.removeAll()
             self.cachedTracksMetadata.removeAll()
             self.cachedIdsSet.removeAll()
-            self.setupDirectories()
+            self.setupDirectories(force: true)
             self.saveManifest()
         }
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: AudioPlayerEngine.trackDidCacheNotification, object: nil)
+        }
+    }
+    
+    // MARK: - Storage Allocation Quota
+    
+    public static let storageLimitKey = "SonoristMaxStorageLimitGB"
+    
+    public var maxStorageLimitGB: Double {
+        get {
+            let val = UserDefaults.standard.double(forKey: Self.storageLimitKey)
+            return val > 0 ? val : 5.0 // Default 5 GB
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: Self.storageLimitKey)
+        }
+    }
+    
+    public var maxStorageLimitBytes: Int64 {
+        Int64(maxStorageLimitGB * 1024 * 1024 * 1024)
+    }
+    
+    private func internalGetCacheSizeBytes() -> Int64 {
+        guard let files = try? fileManager.contentsOfDirectory(at: libraryDirectory, includingPropertiesForKeys: [.fileSizeKey]) else {
+            return 0
+        }
+        var total: Int64 = 0
+        for file in files where file.pathExtension == "sonorist" || file.pathExtension == "m4a" || file.pathExtension == "webm" {
+            if let resourceValues = try? file.resourceValues(forKeys: [.fileSizeKey]),
+               let size = resourceValues.fileSize {
+                total += Int64(size)
+            }
+        }
+        return total
+    }
+    
+    private func pruneCacheIfNeeded(incomingBytes: Int64) {
+        let current = internalGetCacheSizeBytes()
+        guard current + incomingBytes > maxStorageLimitBytes else { return }
+        
+        guard let files = try? fileManager.contentsOfDirectory(at: libraryDirectory, includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey]) else { return }
+        
+        let sorted = files.sorted { f1, f2 in
+            let d1 = (try? f1.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? Date.distantPast
+            let d2 = (try? f2.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? Date.distantPast
+            return d1 < d2
+        }
+        
+        var freed: Int64 = 0
+        let targetToFree = (current + incomingBytes) - maxStorageLimitBytes
+        
+        for file in sorted {
+            guard freed < targetToFree else { break }
+            let name = file.lastPathComponent
+            if let vid = cachedManifest.first(where: { $0.value == name })?.key {
+                let size = (try? file.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+                try? fileManager.removeItem(at: file)
+                cachedManifest.removeValue(forKey: vid)
+                cachedIdsSet.remove(vid)
+                cachedTracksMetadata.removeValue(forKey: vid)
+                freed += Int64(size)
+            }
+        }
+        saveManifest()
     }
     
     // MARK: - Metrics & Navigation
@@ -478,17 +655,7 @@ public final class MediaCacheManager: @unchecked Sendable {
     /// Calculates the total size of cached media files on disk
     public func getCacheSizeBytes() -> Int64 {
         return queue.sync {
-            guard let files = try? fileManager.contentsOfDirectory(at: libraryDirectory, includingPropertiesForKeys: [.fileSizeKey]) else {
-                return 0
-            }
-            var total: Int64 = 0
-            for file in files where file.pathExtension == "sonorist" || file.pathExtension == "m4a" || file.pathExtension == "webm" {
-                if let resourceValues = try? file.resourceValues(forKeys: [.fileSizeKey]),
-                   let size = resourceValues.fileSize {
-                    total += Int64(size)
-                }
-            }
-            return total
+            internalGetCacheSizeBytes()
         }
     }
     
@@ -501,9 +668,11 @@ public final class MediaCacheManager: @unchecked Sendable {
         return formatter.string(fromByteCount: bytes)
     }
     
+    #if os(macOS)
     /// Reveals the parent Sonorist folder in Finder
     public func revealParentFolderInFinder() {
         setupDirectories()
         NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: parentDirectory.path)
     }
+    #endif
 }

@@ -1,35 +1,57 @@
 import SwiftUI
+#if canImport(AppKit)
 import AppKit
+#endif
+#if canImport(UIKit)
+import UIKit
+#endif
 
-/// Physical Taptic Engine haptic feedback for macOS Force Touch trackpads
+/// Physical Taptic Engine haptic feedback for Apple platforms
 public enum FluidHaptics {
     /// Crisp, subtle tactile click (buttons, format selection, timer pick, navigation)
     public static func tap() {
+        #if os(macOS)
         NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .default)
+        #elseif os(iOS)
+        UISelectionFeedbackGenerator().selectionChanged()
+        #endif
     }
     
     /// Firm confirmation feedback (play/pause toggle, track skip, like heart)
     public static func toggle() {
+        #if os(macOS)
         NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .default)
+        #elseif os(iOS)
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        #endif
     }
     
     /// Elastic snap feedback (scrubber seek, lyrics line jump, volume snap)
     public static func snap() {
+        #if os(macOS)
         NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
+        #elseif os(iOS)
+        UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+        #endif
     }
 }
 
-/// Apple Design System guidelines conforming to WWDC Fluid Interfaces & macOS Human Interface Guidelines.
+/// Apple Design System guidelines conforming to WWDC Fluid Interfaces & Human Interface Guidelines.
 public enum FluidTheme {
     // MARK: - Colors & Vibrancy
     public static let accent = Color.accentColor
     public static let musicRed = Color(red: 0.95, green: 0.22, blue: 0.28)
+    public static let downloadGreen = Color(red: 0.20, green: 0.78, blue: 0.35)
     public static let secondaryText = Color.secondary
     
     // Backgrounds & Chrome
     public static let glassMaterial = Material.ultraThinMaterial
     public static let barMaterial = Material.bar
+    #if os(macOS)
     public static let cardBackground = Color(nsColor: .windowBackgroundColor).opacity(0.6)
+    #else
+    public static let cardBackground = Color(uiColor: .secondarySystemBackground)
+    #endif
     
     // MARK: - Springs (Apple WWDC 2018 Fluid Interfaces)
     /// Critically damped spring for general UI transitions (damping 1.0, response 0.35s)

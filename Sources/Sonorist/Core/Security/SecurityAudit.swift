@@ -15,7 +15,9 @@ public enum SecurityAudit {
         "yt3.googleusercontent.com",
         "ggpht.com",
         "yt3.ggpht.com",
-        "lrclib.net"
+        "lrclib.net",
+        "music.163.com",
+        "163.com"
     ]
     
     /// Validates an external URL for App Transport Security and trusted domain origin

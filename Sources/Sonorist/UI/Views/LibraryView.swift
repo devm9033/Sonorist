@@ -31,7 +31,17 @@ public final class LibraryViewModel: ObservableObject {
     @Published public var showDeleteTrackAlert: Bool = false
     @Published public var exportStatusMessage: String? = nil
     
-    public init() {}
+    public init() {
+        NotificationCenter.default.addObserver(
+            forName: AudioPlayerEngine.trackDidCacheNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.loadOfflineTracks()
+            }
+        }
+    }
     
     public func loadOfflineTracks() {
         self.offlineTracks = MediaCacheManager.shared.getAllCachedTracks()
@@ -474,8 +484,7 @@ public struct LibraryView: View {
                             viewModel.showDeleteTrackAlert = true
                         },
                         onPlay: {
-                            player.queue = tracks
-                            player.play(track: track)
+                            player.playFromOfflineLibrary(tracks: tracks, selectedTrack: track)
                         }
                     )
                 }

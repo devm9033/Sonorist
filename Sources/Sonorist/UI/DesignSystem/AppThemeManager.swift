@@ -1,5 +1,7 @@
 import SwiftUI
+#if os(macOS)
 import AppKit
+#endif
 import Combine
 
 /// Supported application theme modes conforming to Apple Human Interface Guidelines
@@ -65,6 +67,22 @@ public final class AppThemeManager: ObservableObject {
             self.currentTheme = .system
         }
         applyAppearance()
+        
+        // Listen for live theme modifications from iOS native Settings app (Settings.bundle)
+        NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self = self else { return }
+            if let saved = UserDefaults.standard.string(forKey: AppThemeManager.themeDefaultsKey),
+               let mode = AppThemeMode(rawValue: saved),
+               mode != self.currentTheme {
+                withAnimation(FluidTheme.fluidSpring) {
+                    self.currentTheme = mode
+                }
+            }
+        }
     }
     
     /// Switch theme mode with animated transition and physical haptic feedback
@@ -76,8 +94,9 @@ public final class AppThemeManager: ObservableObject {
         }
     }
     
-    /// Synchronize NSApplication window chrome, titlebars, menus and sheets
+    /// Synchronize NSApplication / UIApplication window chrome, titlebars, menus and sheets
     public func applyAppearance() {
+        #if os(macOS)
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             switch self.currentTheme {
@@ -89,5 +108,26 @@ public final class AppThemeManager: ObservableObject {
                 NSApp?.appearance = NSAppearance(named: .darkAqua)
             }
         }
+        #elseif os(iOS)
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            let style: UIUserInterfaceStyle
+            switch self.currentTheme {
+            case .system:
+                style = .unspecified
+            case .light:
+                style = .light
+            case .dark:
+                style = .dark
+            }
+            for scene in UIApplication.shared.connectedScenes {
+                if let windowScene = scene as? UIWindowScene {
+                    for window in windowScene.windows {
+                        window.overrideUserInterfaceStyle = style
+                    }
+                }
+            }
+        }
+        #endif
     }
 }

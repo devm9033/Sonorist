@@ -316,7 +316,7 @@ public struct PlayerBarScrubberLine: View {
                 Button(action: {
                     FluidHaptics.tap()
                     withAnimation(FluidTheme.tapSpring) {
-                        player.isShuffle.toggle()
+                        player.toggleShuffle()
                     }
                 }) {
                     Image(systemName: "shuffle")
@@ -383,15 +383,15 @@ public struct PlayerBarScrubberLine: View {
                 Button(action: {
                     FluidHaptics.tap()
                     withAnimation(FluidTheme.tapSpring) {
-                        player.isRepeat.toggle()
+                        player.toggleRepeatMode()
                     }
                 }) {
-                    Image(systemName: "repeat")
+                    Image(systemName: player.repeatMode == .one ? "repeat.1" : "repeat")
                         .font(.system(size: iconSize, weight: .semibold))
-                        .foregroundColor(player.isRepeat ? FluidTheme.musicRed : .secondary)
+                        .foregroundColor(player.repeatMode != .off ? FluidTheme.musicRed : .secondary)
                 }
                 .buttonStyle(ApplePlayerButtonStyle(width: btnDim, height: btnDim, cornerRadius: 6))
-                .help(player.isRepeat ? "Repeat On" : "Repeat Off")
+                .help(player.repeatMode.title)
             }
         }
         .layoutPriority(2)

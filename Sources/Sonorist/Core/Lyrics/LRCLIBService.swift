@@ -104,14 +104,18 @@ public actor LRCLIBService {
     public init(session: URLSession = .shared) {
         self.session = session
         
-        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let appFolder = appSupport.appendingPathComponent("Sonorist", isDirectory: true)
-        if fileManager.isWritableFile(atPath: appFolder.path) {
-            self.lyricsCacheDir = appFolder.appendingPathComponent("LyricsCache", isDirectory: true)
+        let fm = FileManager.default
+        let defaultAppSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+        let appFolder = defaultAppSupport?.appendingPathComponent("Sonorist", isDirectory: true)
+        if let folder = appFolder,
+           (try? fm.createDirectory(at: folder, withIntermediateDirectories: true)) != nil &&
+           fm.isWritableFile(atPath: folder.path) {
+            self.lyricsCacheDir = folder.appendingPathComponent("LyricsCache", isDirectory: true)
         } else {
-            self.lyricsCacheDir = URL(fileURLWithPath: "/tmp/Sonorist/LyricsCache", isDirectory: true)
+            let fallbackDir = URL(fileURLWithPath: "/tmp/Sonorist", isDirectory: true)
+            self.lyricsCacheDir = fallbackDir.appendingPathComponent("LyricsCache", isDirectory: true)
         }
-        try? fileManager.createDirectory(at: self.lyricsCacheDir, withIntermediateDirectories: true)
+        try? fm.createDirectory(at: self.lyricsCacheDir, withIntermediateDirectories: true)
     }
     
     /// Fetches synchronized lyrics for a track across multi-source providers, checking offline cache first
@@ -153,13 +157,22 @@ public actor LRCLIBService {
         }
         
         // 2. LRCLIB Fallback search endpoint with duration proximity (syncedOnly: true)
-        if let lines = await querySearchEndpoint(query: searchQuery, preferredTitle: title, preferredDuration: dur, syncedOnly: true) {
+        if let lines = await querySearchEndpoint(query: searchQuery, preferredTitle: title, preferredArtist: isValidArtist ? artist : nil, preferredDuration: dur, syncedOnly: true) {
             let enriched = enrichLines(lines)
             saveCachedLyrics(enriched, for: track.id)
             return enriched
         }
         
-        if isValidArtist, let lines = await querySearchEndpoint(query: title, preferredTitle: title, preferredDuration: dur, syncedOnly: true) {
+        // 2b. If artist was generic but album exists, search title + album
+        if !isValidArtist, let album = track.album, !album.isEmpty {
+            if let lines = await querySearchEndpoint(query: "\(title) \(album)", preferredTitle: title, preferredArtist: nil, preferredDuration: dur, syncedOnly: true) {
+                let enriched = enrichLines(lines)
+                saveCachedLyrics(enriched, for: track.id)
+                return enriched
+            }
+        }
+        
+        if isValidArtist, let lines = await querySearchEndpoint(query: title, preferredTitle: title, preferredArtist: artist, preferredDuration: dur, syncedOnly: true) {
             let enriched = enrichLines(lines)
             saveCachedLyrics(enriched, for: track.id)
             return enriched
@@ -182,7 +195,7 @@ public actor LRCLIBService {
             }
         }
         
-        if let lines = await querySearchEndpoint(query: searchQuery, preferredTitle: title, preferredDuration: dur, syncedOnly: false) {
+        if let lines = await querySearchEndpoint(query: searchQuery, preferredTitle: title, preferredArtist: isValidArtist ? artist : nil, preferredDuration: dur, syncedOnly: false) {
             let enriched = enrichLines(lines)
             saveCachedLyrics(enriched, for: track.id)
             return enriched
@@ -230,7 +243,7 @@ public actor LRCLIBService {
         }
     }
     
-    private func querySearchEndpoint(query: String, preferredTitle: String, preferredDuration: Double? = nil, syncedOnly: Bool = false) async -> [LyricLine]? {
+    private func querySearchEndpoint(query: String, preferredTitle: String, preferredArtist: String? = nil, preferredDuration: Double? = nil, syncedOnly: Bool = false) async -> [LyricLine]? {
         var components = URLComponents(string: "https://lrclib.net/api/search")
         components?.queryItems = [
             URLQueryItem(name: "q", value: query)
@@ -252,7 +265,12 @@ public actor LRCLIBService {
             
             // Search returns an array of records
             if let array = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
-                let syncedItems = array.filter { item in
+                // Relevance filter: Reject records that don't match title or artist to prevent showing random songs
+                let relevantItems = array.filter { item in
+                    self.isCandidateRelevant(item: item, preferredTitle: preferredTitle, preferredArtist: preferredArtist)
+                }
+                
+                let syncedItems = relevantItems.filter { item in
                     if let synced = item["syncedLyrics"] as? String, !synced.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         return true
                     }
@@ -278,8 +296,8 @@ public actor LRCLIBService {
                 }
                 
                 if !syncedOnly {
-                    // Priority 2: Record with plain lyrics
-                    for item in array {
+                    // Priority 2: Record with plain lyrics from relevant items
+                    for item in relevantItems {
                         if let plain = item["plainLyrics"] as? String, !plain.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             if let itemData = try? JSONSerialization.data(withJSONObject: item),
                                let parsed = parseLRCLIBResponse(data: itemData, syncedOnly: false) {
@@ -293,6 +311,49 @@ public actor LRCLIBService {
         } catch {
             return nil
         }
+    }
+    
+    private func isCandidateRelevant(item: [String: Any], preferredTitle: String, preferredArtist: String?) -> Bool {
+        guard let trackName = (item["trackName"] as? String)?.lowercased() else { return false }
+        let candidateArtist = (item["artistName"] as? String)?.lowercased() ?? ""
+        
+        let targetTitle = cleanSongTitle(preferredTitle).lowercased()
+        let targetArtist = (preferredArtist ?? "").lowercased()
+        
+        // Exact match
+        if trackName == targetTitle {
+            return true
+        }
+        
+        // Check for artist match
+        let hasArtistMatch: Bool
+        if !targetArtist.isEmpty && targetArtist != "youtube music" && targetArtist != "song" {
+            let artistTokens = targetArtist.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { $0.count >= 3 }
+            hasArtistMatch = artistTokens.contains { candidateArtist.contains($0) } || candidateArtist.contains(targetArtist)
+        } else {
+            hasArtistMatch = false
+        }
+        
+        // Extract significant title tokens
+        let stopwords: Set<String> = ["the", "and", "from", "with", "for", "you", "song", "audio", "video", "official", "remix", "ost"]
+        let titleTokens = targetTitle.components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { $0.count >= 3 && !stopwords.contains($0) }
+        
+        let candidateTokens = Set(trackName.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { $0.count >= 3 })
+        let overlap = titleTokens.filter { candidateTokens.contains($0) }
+        
+        if hasArtistMatch {
+            return titleTokens.isEmpty || !overlap.isEmpty || trackName.contains(targetTitle) || targetTitle.contains(trackName)
+        } else {
+            if !titleTokens.isEmpty {
+                let ratio = Double(overlap.count) / Double(titleTokens.count)
+                if overlap.count >= 2 || ratio >= 0.6 {
+                    return true
+                }
+            }
+        }
+        
+        return false
     }
     
     // MARK: - NetEase Cloud Music Provider
@@ -523,32 +584,68 @@ public actor LRCLIBService {
     
     // MARK: - Real-Time AI Translation Engine
     
-    /// Translates a collection of lyric lines into target language asynchronously
+    /// Translates a collection of lyric lines into target language asynchronously using high-speed chunked batch requests
     public func translateLines(_ lines: [LyricLine], targetLanguage: String = "en") async -> [LyricLine] {
+        guard !lines.isEmpty else { return lines }
         var updated = lines
-        for i in 0..<updated.count {
-            if updated[i].translation != nil { continue }
-            let original = updated[i].text
-            guard !original.isEmpty else { continue }
-            
-            let translated = await translateText(original, targetLanguage: targetLanguage)
-            if let trans = translated, !trans.isEmpty, trans.lowercased() != original.lowercased() {
-                updated[i].translation = trans
+        
+        // Find indices that actually need translation
+        var indicesToTranslate: [Int] = []
+        var textsToTranslate: [String] = []
+        for (idx, line) in lines.enumerated() {
+            let trimmed = line.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if line.translation == nil && !trimmed.isEmpty {
+                indicesToTranslate.append(idx)
+                textsToTranslate.append(trimmed)
             }
         }
+        
+        guard !indicesToTranslate.isEmpty else { return lines }
+        
+        // Chunk into batches of up to 15 lines to ensure quick responses and stay within limits
+        let batchSize = 15
+        let totalBatches = Int(ceil(Double(textsToTranslate.count) / Double(batchSize)))
+        
+        for batchIdx in 0..<totalBatches {
+            let start = batchIdx * batchSize
+            let end = min(start + batchSize, textsToTranslate.count)
+            let batchTexts = Array(textsToTranslate[start..<end])
+            let batchIndices = Array(indicesToTranslate[start..<end])
+            
+            // Join lines with newline character which Google Translate preserves
+            let joinedText = batchTexts.joined(separator: "\n")
+            if let translatedBatch = await translateBatchText(joinedText, targetLanguage: targetLanguage) {
+                let translatedLines = translatedBatch.components(separatedBy: "\n")
+                for (offset, lineIdx) in batchIndices.enumerated() {
+                    if offset < translatedLines.count {
+                        let trans = translatedLines[offset].trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !trans.isEmpty && trans.lowercased() != batchTexts[offset].lowercased() {
+                            updated[lineIdx].translation = trans
+                        }
+                    }
+                }
+            }
+        }
+        
         return updated
     }
     
-    /// Translates a single text string via public Google Translate web API
-    public func translateText(_ text: String, targetLanguage: String = "en") async -> String? {
-        guard let encoded = text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let url = URL(string: "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=\(targetLanguage)&dt=t&q=\(encoded)") else {
+    /// Batched translation query to Google Translate in a single network round-trip via HTTP POST
+    private func translateBatchText(_ text: String, targetLanguage: String = "en") async -> String? {
+        guard let url = URL(string: "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=\(targetLanguage)&dt=t") else {
             return nil
         }
         
         var request = URLRequest(url: url)
-        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", forHTTPHeaderField: "User-Agent")
-        request.timeoutInterval = 4.0
+        request.httpMethod = "POST"
+        request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
+        request.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 6.0
+        
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._~")
+        let encodedBody = text.addingPercentEncoding(withAllowedCharacters: allowed) ?? ""
+        request.httpBody = "q=\(encodedBody)".data(using: .utf8)
         
         do {
             let (data, response) = try await session.data(for: request)
@@ -556,10 +653,15 @@ public actor LRCLIBService {
                   let array = try? JSONSerialization.jsonObject(with: data) as? [Any],
                   let segments = array.first as? [[Any]] else { return nil }
             let full = segments.compactMap { $0.first as? String }.joined()
-            return full.trimmingCharacters(in: .whitespacesAndNewlines)
+            return full
         } catch {
             return nil
         }
+    }
+    
+    /// Translates a single text string via public Google Translate web API
+    public func translateText(_ text: String, targetLanguage: String = "en") async -> String? {
+        return await translateBatchText(text, targetLanguage: targetLanguage)
     }
     
     // MARK: - Song Story & Meaning (Music DNA)
@@ -674,19 +776,23 @@ public actor LRCLIBService {
         
         var storyParts: [String] = []
         if let movieOrAlbum = movieOrAlbum {
-            storyParts.append("Featured in \"\(movieOrAlbum)\"\(year != nil ? " (\(year!))" : "").")
+            if let y = year {
+                storyParts.append("Featured in \"\(movieOrAlbum)\" (\(y)).")
+            } else {
+                storyParts.append("Featured in \"\(movieOrAlbum)\".")
+            }
         } else if let year = year {
             storyParts.append("Released in \(year).")
         }
         
         var creditParts: [String] = []
-        if let composer = composer {
-            creditParts.append("Composed by \(composer)")
-        }
-        if let lyricist = lyricist {
-            if lyricist == composer {
-                creditParts[creditParts.count - 1] = "Composed and written by \(composer!)"
-            } else {
+        if let composer = composer, let lyricist = lyricist, composer == lyricist {
+            creditParts.append("Composed and written by \(composer)")
+        } else {
+            if let composer = composer {
+                creditParts.append("Composed by \(composer)")
+            }
+            if let lyricist = lyricist {
                 creditParts.append("penned by \(lyricist)")
             }
         }
@@ -770,12 +876,13 @@ public actor LRCLIBService {
         }
         
         // 4. High-Fidelity Musical Profile
-        let albumText = track.album != nil ? " from the album \"\(track.album!)\"" : ""
+        let albumText = track.album.map { " from the album \"\($0)\"" } ?? ""
         let durationText = track.durationSeconds > 0 ? " with a runtime of \(track.formattedDuration)" : ""
+        let summaryText = track.album.map { "\(track.artist) • \($0)" } ?? track.artist
         return TrackStory(
             title: track.title,
             artist: track.artist,
-            summary: "\(track.artist)\(track.album != nil ? " • " + track.album! : "")",
+            summary: summaryText,
             source: "Verified Track Metadata",
             releaseYear: track.album,
             genre: track.audioFormat,
@@ -908,6 +1015,10 @@ public actor LRCLIBService {
             #"\[HD\]"#,
             #"\(feat\.[^\)]+\)"#,
             #"\(ft\.[^\)]+\)"#,
+            #"\((From|from|FROM)[^\)]+\)"#,
+            #"\[(From|from|FROM)[^\]]+\]"#,
+            #"\((OST|Soundtrack)[^\)]*\)"#,
+            #"\[(OST|Soundtrack)[^\]]*\]"#,
             #"\| Official Video"#
         ]
         for pat in patterns {
@@ -934,7 +1045,9 @@ public actor LRCLIBService {
     // MARK: - Disk Cache
     
     private func loadCachedLyrics(for trackId: String) -> [LyricLine]? {
-        let file = lyricsCacheDir.appendingPathComponent("\(trackId).json")
+        let safeId = trackId.filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
+        guard !safeId.isEmpty else { return nil }
+        let file = lyricsCacheDir.appendingPathComponent("\(safeId).json")
         guard let data = try? Data(contentsOf: file),
               let lines = try? JSONDecoder().decode([LyricLine].self, from: data) else {
             return nil
@@ -943,7 +1056,9 @@ public actor LRCLIBService {
     }
     
     private func saveCachedLyrics(_ lines: [LyricLine], for trackId: String) {
-        let file = lyricsCacheDir.appendingPathComponent("\(trackId).json")
+        let safeId = trackId.filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
+        guard !safeId.isEmpty else { return }
+        let file = lyricsCacheDir.appendingPathComponent("\(safeId).json")
         if let data = try? JSONEncoder().encode(lines) {
             try? data.write(to: file, options: .atomic)
         }

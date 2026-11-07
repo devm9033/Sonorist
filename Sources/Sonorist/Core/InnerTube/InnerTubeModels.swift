@@ -43,7 +43,7 @@ public struct Track: Identifiable, Hashable, Codable, Sendable {
     public let artist: String
     public let album: String?
     public let durationSeconds: Double
-    public let artworkURL: URL?
+    public var artworkURL: URL?
     public var streamURL: URL?
     public var audioFormat: String
     public var isLiked: Bool

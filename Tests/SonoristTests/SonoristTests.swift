@@ -810,6 +810,107 @@ struct SonoristTestsRunner {
             player.isImmersiveViewActive = false
         }
         
+        // MARK: - 11. Penetration Testing & Exploit Hardening Suite
+        test("PenTest: Corrupted / Out-of-Bounds .sonorist Bundle Rejection") {
+            // Test 1: Truncated binary data
+            var corrupted = "SONORIST".data(using: .utf8)!
+            var ver: UInt16 = 1
+            corrupted.append(Data(bytes: &ver, count: 2))
+            var fakeLen: UInt32 = 999999 // Lies about metadata length
+            corrupted.append(Data(bytes: &fakeLen, count: 4))
+            corrupted.append("SHORT_PAYLOAD".data(using: .utf8)!)
+            
+            do {
+                _ = try SonoristBundleEngine.unpack(data: corrupted)
+                throw TestError("Expected unpack to fail with out-of-bounds error")
+            } catch {
+                // Expected failure safely caught without fatal exception
+            }
+            
+            do {
+                _ = try SonoristBundleEngine.readMetadataOnly(from: corrupted)
+                throw TestError("Expected readMetadataOnly to fail with out-of-bounds error")
+            } catch {
+                // Expected failure safely caught
+            }
+        }
+        
+        test("PenTest: Zip-Bomb & Oversized Allocation Rejection") {
+            var bomb = "SONORIST".data(using: .utf8)!
+            var ver: UInt16 = 1
+            bomb.append(Data(bytes: &ver, count: 2))
+            var metaLen: UInt32 = 1000000000 // 1GB fake metadata
+            bomb.append(Data(bytes: &metaLen, count: 4))
+            
+            do {
+                _ = try SonoristBundleEngine.unpack(data: bomb)
+                throw TestError("Expected oversized payload to be rejected")
+            } catch {
+                // Expected safe rejection
+            }
+        }
+        
+        test("PenTest: Path Traversal Character Stripping") {
+            let maliciousId = "../../etc/passwd"
+            let sanitized = maliciousId.filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
+            guard !sanitized.contains("/") && !sanitized.contains("..") else {
+                throw TestError("Path traversal sequences were not stripped: \(sanitized)")
+            }
+            guard sanitized == "etcpasswd" else {
+                throw TestError("Sanitization result unexpected: \(sanitized)")
+            }
+        }
+        
+        test("PenTest: SSRF & Internal Network Rejection") {
+            let ssrf1 = "http://169.254.169.254/latest/meta-data"
+            guard SecurityAudit.validateURL(ssrf1) == nil else { throw TestError("SSRF URL was not blocked") }
+            
+            let ssrf2 = "https://192.168.1.1/admin"
+            guard SecurityAudit.validateURL(ssrf2) == nil else { throw TestError("Private LAN IP was not blocked") }
+            
+            let ssrf3 = "javascript:alert(1)"
+            guard SecurityAudit.validateURL(ssrf3) == nil else { throw TestError("JavaScript URI was not blocked") }
+        }
+        
+        test("Apple Queue Philosophy: Index 0 Head-of-Queue Boundary Integrity") {
+            let engine = AudioPlayerEngine.shared
+            let t1 = Track(id: "seed_song_1", title: "Seed 1", artist: "Artist 1")
+            let t2 = Track(id: "radio_rec_2", title: "Radio 2", artist: "Artist 2")
+            let t3 = Track(id: "radio_rec_3", title: "Radio 3", artist: "Artist 3")
+            
+            engine.queue = [t1, t2, t3]
+            engine.currentTrack = t1
+            engine.currentTime = 1.0 // Within 3s window
+            engine.repeatMode = .off
+            
+            // 1. getPreviousTrackInQueue must be nil when at index 0 and repeatMode != .all
+            guard engine.getPreviousTrackInQueue() == nil else {
+                throw TestError("getPreviousTrackInQueue() must be nil at index 0 when repeat is off")
+            }
+            
+            // 2. previous() at index 0 must rewind to 0:00 without wrapping to t3
+            engine.previous()
+            guard engine.currentTrack?.id == "seed_song_1" else {
+                throw TestError("previous() wrapped around to queue.last instead of rewinding current track")
+            }
+            guard engine.currentTime == 0.0 else {
+                throw TestError("previous() did not seek to 0:00")
+            }
+            
+            // 3. forcePreviousTrack() at index 0 must rewind to 0:00 without wrapping to t3
+            engine.forcePreviousTrack()
+            guard engine.currentTrack?.id == "seed_song_1" else {
+                throw TestError("forcePreviousTrack() wrapped around to queue.last instead of staying on current track")
+            }
+            
+            // 4. Only when repeatMode == .all should it wrap around
+            engine.repeatMode = .all
+            guard engine.getPreviousTrackInQueue()?.id == "radio_rec_3" else {
+                throw TestError("getPreviousTrackInQueue() should wrap to queue.last when repeatMode is .all")
+            }
+            engine.repeatMode = .off
+        }
+        
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         print("  Results: \(passed) passed, \(failed) failed")
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")

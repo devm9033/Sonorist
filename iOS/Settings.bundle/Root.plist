@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>StringsTable</key>
+	<string>Root</string>
+	<key>PreferenceSpecifiers</key>
+	<array>
+		<dict>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+			<key>Title</key>
+			<string>Appearance</string>
+			<key>FooterText</key>
+			<string>Choose how Sonorist looks on your iPhone.</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSMultiValueSpecifier</string>
+			<key>Title</key>
+			<string>Theme</string>
+			<key>Key</key>
+			<string>Sonorist.AppThemeMode</string>
+			<key>DefaultValue</key>
+			<string>system</string>
+			<key>Titles</key>
+			<array>
+				<string>System (Match Device)</string>
+				<string>Light (Pure White)</string>
+				<string>Dark (OLED Black)</string>
+			</array>
+			<key>Values</key>
+			<array>
+				<string>system</string>
+				<string>light</string>
+				<string>dark</string>
+			</array>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+			<key>Title</key>
+			<string>Audio Streaming</string>
+			<key>FooterText</key>
+			<string>Higher bitrates deliver studio fidelity with uncompressed high frequencies.</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSMultiValueSpecifier</string>
+			<key>Title</key>
+			<string>Audio Quality</string>
+			<key>Key</key>
+			<string>Sonorist.AudioQuality</string>
+			<key>DefaultValue</key>
+			<string>opus160</string>
+			<key>Titles</key>
+			<array>
+				<string>High-Res (Opus 160 kbps)</string>
+				<string>Standard (AAC 128 kbps)</string>
+				<string>Data Saver (AAC 48 kbps)</string>
+			</array>
+			<key>Values</key>
+			<array>
+				<string>opus160</string>
+				<string>aac128</string>
+				<string>aac48</string>
+			</array>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSToggleSwitchSpecifier</string>
+			<key>Title</key>
+			<string>Sound Check (Normalize Volume)</string>
+			<key>Key</key>
+			<string>Sonorist.AudioNormalization</string>
+			<key>DefaultValue</key>
+			<true/>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSToggleSwitchSpecifier</string>
+			<key>Title</key>
+			<string>Autoplay Similar Music</string>
+			<key>Key</key>
+			<string>Sonorist.Autoplay</string>
+			<key>DefaultValue</key>
+			<true/>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+			<key>Title</key>
+			<string>About Sonorist</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSTitleValueSpecifier</string>
+			<key>Title</key>
+			<string>Engine</string>
+			<key>Key</key>
+			<string>Sonorist.EngineInfo</string>
+			<key>DefaultValue</key>
+			<string>AVFoundation (Native CoreAudio)</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSTitleValueSpecifier</string>
+			<key>Title</key>
+			<string>Version</string>
+			<key>Key</key>
+			<string>Sonorist.AppVersion</string>
+			<key>DefaultValue</key>
+			<string>2.4.0</string>
+		</dict>
+	</array>
+</dict>
+</plist>

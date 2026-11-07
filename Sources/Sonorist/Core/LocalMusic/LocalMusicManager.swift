@@ -1,6 +1,8 @@
 import Foundation
 import AVFoundation
+#if os(macOS)
 import AppKit
+#endif
 
 /// Local Music Manager enabling Sonorist to act as a clean, fast offline music player
 /// Handles local file imports, ID3/QuickTime metadata parsing, and offline library indexing.
@@ -16,14 +18,14 @@ public final class LocalMusicManager: ObservableObject {
     private let artworkCacheDir: URL
     
     public init() {
-        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? fileManager.temporaryDirectory
         let appFolder = appSupport.appendingPathComponent("Sonorist", isDirectory: true)
         
-        if fileManager.isWritableFile(atPath: appFolder.path) {
+        if (try? fileManager.createDirectory(at: appFolder, withIntermediateDirectories: true)) != nil {
             self.libraryManifestURL = appFolder.appendingPathComponent("local_library.json")
             self.artworkCacheDir = appFolder.appendingPathComponent("LocalArtwork", isDirectory: true)
         } else {
-            let fallback = URL(fileURLWithPath: "/tmp/Sonorist", isDirectory: true)
+            let fallback = fileManager.temporaryDirectory.appendingPathComponent("Sonorist", isDirectory: true)
             self.libraryManifestURL = fallback.appendingPathComponent("local_library.json")
             self.artworkCacheDir = fallback.appendingPathComponent("LocalArtwork", isDirectory: true)
         }
@@ -34,6 +36,7 @@ public final class LocalMusicManager: ObservableObject {
     
     // MARK: - Open Panel File Picker
     
+    #if os(macOS)
     /// Presents a native macOS NSOpenPanel to import audio files or directories
     public func promptForImport() {
         let panel = NSOpenPanel()
@@ -59,6 +62,7 @@ public final class LocalMusicManager: ObservableObject {
             }
         }
     }
+    #endif
     
     /// Imports an array of file/folder URLs recursively
     public func importURLs(_ urls: [URL]) async {

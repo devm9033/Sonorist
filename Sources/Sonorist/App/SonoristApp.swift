@@ -39,12 +39,12 @@ struct SonoristApp: App {
                 Divider()
                 
                 Button(player.isShuffle ? "Disable Shuffle" : "Enable Shuffle") {
-                    player.isShuffle.toggle()
+                    player.toggleShuffle()
                 }
                 .keyboardShortcut("s", modifiers: [.command])
                 
-                Button(player.isRepeat ? "Disable Repeat" : "Repeat Track") {
-                    player.isRepeat.toggle()
+                Button(player.repeatMode.title) {
+                    player.toggleRepeatMode()
                 }
                 .keyboardShortcut("r", modifiers: [.command])
             }

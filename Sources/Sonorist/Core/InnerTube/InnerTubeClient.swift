@@ -11,8 +11,16 @@ public actor InnerTubeClient {
     // In-memory query cache for instant responses and zero duplicate network requests (TTL: 5 mins)
     private var searchCache: [String: (timestamp: Date, tracks: [Track])] = [:]
     
-    public init(session: URLSession = .shared, cipherEngine: YouTubeCipherEngine = .shared) {
-        self.session = session
+    public init(session: URLSession? = nil, cipherEngine: YouTubeCipherEngine = .shared) {
+        if let s = session {
+            self.session = s
+        } else {
+            let config = URLSessionConfiguration.default
+            config.timeoutIntervalForRequest = 15.0
+            config.timeoutIntervalForResource = 45.0
+            config.waitsForConnectivity = false
+            self.session = URLSession(configuration: config)
+        }
         self.cipherEngine = cipherEngine
     }
     
@@ -36,10 +44,11 @@ public actor InnerTubeClient {
                 }
             }
         } else if enhanced.contains("i.ytimg.com") {
+            // Upgrade default.jpg / hqdefault.jpg to maxresdefault.jpg which is high-resolution 1280x720
             enhanced = enhanced
                 .replacingOccurrences(of: "/hqdefault.jpg", with: "/maxresdefault.jpg")
-                .replacingOccurrences(of: "/sddefault.jpg", with: "/maxresdefault.jpg")
-                .replacingOccurrences(of: "/default.jpg", with: "/hqdefault.jpg")
+                .replacingOccurrences(of: "/default.jpg", with: "/maxresdefault.jpg")
+                .replacingOccurrences(of: "/mqdefault.jpg", with: "/maxresdefault.jpg")
         }
         
         return SecurityAudit.validateURL(enhanced) ?? SecurityAudit.validateURL(raw)
@@ -345,12 +354,13 @@ public actor InnerTubeClient {
                 
                 if let directUrl = format.url, let streamURL = SecurityAudit.validateURL(directUrl) {
                     let unthrottled = cipherEngine.descrambleNParam(in: streamURL.absoluteString)
-                    if let finalURL = URL(string: unthrottled) {
+                    if let finalURL = SecurityAudit.validateURL(unthrottled) {
                         resolvedCandidates.append((quality, finalURL, label, format.itag, bitrate))
                     }
                 } else if let rawCipher = format.signatureCipher ?? format.cipher,
-                          let deciphered = cipherEngine.decipher(rawCipher: rawCipher) {
-                    resolvedCandidates.append((quality, deciphered, label, format.itag, bitrate))
+                          let deciphered = cipherEngine.decipher(rawCipher: rawCipher),
+                          let safeDeciphered = SecurityAudit.validateURL(deciphered.absoluteString) {
+                    resolvedCandidates.append((quality, safeDeciphered, label, format.itag, bitrate))
                 }
             }
         }
@@ -360,12 +370,13 @@ public actor InnerTubeClient {
             for format in formats where format.itag == 18 {
                 if let directUrl = format.url, let streamURL = SecurityAudit.validateURL(directUrl) {
                     let unthrottled = cipherEngine.descrambleNParam(in: streamURL.absoluteString)
-                    if let finalURL = URL(string: unthrottled) {
+                    if let finalURL = SecurityAudit.validateURL(unthrottled) {
                         resolvedCandidates.append((.standard, finalURL, "AAC 128k", 18, format.bitrate ?? 128000))
                     }
                 } else if let rawCipher = format.signatureCipher ?? format.cipher,
-                          let deciphered = cipherEngine.decipher(rawCipher: rawCipher) {
-                    resolvedCandidates.append((.standard, deciphered, "AAC 128k", 18, format.bitrate ?? 128000))
+                          let deciphered = cipherEngine.decipher(rawCipher: rawCipher),
+                          let safeDeciphered = SecurityAudit.validateURL(deciphered.absoluteString) {
+                    resolvedCandidates.append((.standard, safeDeciphered, "AAC 128k", 18, format.bitrate ?? 128000))
                 }
             }
         }
@@ -404,38 +415,60 @@ public actor InnerTubeClient {
             return []
         }
         
-        var tracks: [Track] = []
+        var songTracks: [Track] = []
+        var videoTracks: [Track] = []
         var seenIds = Set<String>()
         
-        func extractTracks(from obj: Any) {
-            if let dict = obj as? [String: Any] {
+        // In-order sequential traversal to strictly preserve YouTube Music's curated relevance
+        var queue: [Any] = [json]
+        var head = 0
+        let maxItems = 12_000
+        
+        while head < queue.count && head < maxItems {
+            let current = queue[head]
+            head += 1
+            
+            if let dict = current as? [String: Any] {
                 if let renderer = dict["musicResponsiveListItemRenderer"] as? [String: Any] {
-                    if let track = makeTrack(from: renderer), !seenIds.contains(track.id) {
+                    if let (track, isVideo) = makeTrack(from: renderer), !seenIds.contains(track.id) {
                         seenIds.insert(track.id)
-                        tracks.append(track)
+                        if isVideo {
+                            videoTracks.append(track)
+                        } else {
+                            songTracks.append(track)
+                        }
                     }
-                }
-                if let panelRenderer = dict["playlistPanelVideoRenderer"] as? [String: Any] {
+                } else if let panelRenderer = dict["playlistPanelVideoRenderer"] as? [String: Any] {
                     if let track = makeTrack(fromPlaylistPanel: panelRenderer), !seenIds.contains(track.id) {
                         seenIds.insert(track.id)
-                        tracks.append(track)
+                        songTracks.append(track)
+                    }
+                } else {
+                    // Traverse in-order through known list structures first
+                    if let contents = dict["contents"] as? [Any] {
+                        queue.append(contentsOf: contents)
+                    } else if let items = dict["items"] as? [Any] {
+                        queue.append(contentsOf: items)
+                    } else if let tabs = dict["tabs"] as? [Any] {
+                        queue.append(contentsOf: tabs)
+                    } else {
+                        for value in dict.values {
+                            queue.append(value)
+                        }
                     }
                 }
-                for value in dict.values {
-                    extractTracks(from: value)
-                }
-            } else if let array = obj as? [Any] {
-                for element in array {
-                    extractTracks(from: element)
-                }
+            } else if let array = current as? [Any] {
+                queue.append(contentsOf: array)
             }
         }
         
-        extractTracks(from: json)
-        return tracks
+        // Priority Rule: Official Songs ALWAYS appear first with pristine original album art.
+        // Videos / live clips appear ONLY at the end of the list when no more songs are found,
+        // or as a fallback if no studio song exists.
+        return songTracks + videoTracks
     }
     
-    private func makeTrack(from renderer: [String: Any]) -> Track? {
+    private func makeTrack(from renderer: [String: Any]) -> (track: Track, isVideo: Bool)? {
         guard let flexColumns = renderer["flexColumns"] as? [[String: Any]], !flexColumns.isEmpty else {
             return nil
         }
@@ -450,21 +483,42 @@ public actor InnerTubeClient {
             title = text.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         
-        // 2. Intelligent Artist, Album & Duration Extraction
+        let lowerTitle = title.lowercased()
+        if lowerTitle.contains("podcast") || lowerTitle.contains("episode") ||
+           lowerTitle.contains("audiobook") || lowerTitle.contains("audio libro") ||
+           lowerTitle.contains("debate") || lowerTitle.contains("interview") {
+            return nil
+        }
+        
+        // 2. Intelligent Artist, Album, Duration & Item Type Classification
         var artist = "YouTube Music"
         var album: String? = nil
         var durationSeconds: Double = 210
+        var isExplicitVideo = false
+        var isExplicitSong = false
         
         if flexColumns.count >= 2,
            let secondCol = flexColumns[1]["musicResponsiveListItemFlexColumnRenderer"] as? [String: Any],
            let textObj = secondCol["text"] as? [String: Any],
            let runs = textObj["runs"] as? [[String: Any]] {
             
+            // Check first run for YouTube Music explicit type indicator
+            if let firstRun = runs.first, let firstText = firstRun["text"] as? String {
+                let lowerFirst = firstText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                if lowerFirst == "episode" || lowerFirst == "podcast" || lowerFirst == "profile" || lowerFirst == "playlist" {
+                    return nil // Exclude podcasts, episodes, and profiles completely
+                } else if lowerFirst == "video" {
+                    isExplicitVideo = true
+                } else if lowerFirst == "song" || lowerFirst == "single" {
+                    isExplicitSong = true
+                }
+            }
+            
             var candidates: [String] = []
             for run in runs {
                 guard let text = run["text"] as? String else { continue }
                 let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                if trimmed.isEmpty || trimmed == "•" || trimmed == "&" || trimmed.hasPrefix("•") { continue }
+                if trimmed.isEmpty || trimmed == "•" || trimmed == "&" || trimmed == "," || trimmed == "/" || trimmed == "|" || trimmed.hasPrefix("•") || trimmed.hasPrefix(",") { continue }
                 
                 // Timestamp detection (e.g. "3:45" or "1:12:30")
                 if trimmed.contains(":") && trimmed.count <= 8 {
@@ -479,19 +533,41 @@ public actor InnerTubeClient {
                 
                 // Exclude metadata noise
                 let lower = trimmed.lowercased()
-                if lower == "song" || lower == "video" || lower == "single" || lower == "album" ||
+                if lower == "song" || lower == "video" || lower == "single" || lower == "album" || lower == "episode" || lower == "podcast" ||
                    lower.contains("views") || lower.contains("plays") || lower.contains("audience") || lower.contains("subscribers") {
                     continue
                 }
                 
-                candidates.append(trimmed)
+                // Filter out stray punctuation tokens
+                let stripped = trimmed.trimmingCharacters(in: CharacterSet.punctuationCharacters.union(.whitespacesAndNewlines))
+                if !stripped.isEmpty && stripped.count > 1 {
+                    candidates.append(trimmed)
+                }
             }
             
             if let firstValid = candidates.first {
                 artist = firstValid
             }
             if candidates.count > 1 {
-                album = candidates[1]
+                let second = candidates[1]
+                if second != artist {
+                    album = second
+                }
+            }
+        }
+        
+        // Exclude talk shows and excessively long content (> 15 mins)
+        if durationSeconds > 900 { return nil }
+        
+        // Fallback: Check renderer subtitle if artist wasn't found in flex column
+        if artist == "YouTube Music",
+           let subtitle = renderer["subtitle"] as? [String: Any],
+           let runs = subtitle["runs"] as? [[String: Any]],
+           let first = runs.first?["text"] as? String {
+            let trimmed = first.trimmingCharacters(in: .whitespacesAndNewlines)
+            let lowerTrimmed = trimmed.lowercased()
+            if !trimmed.isEmpty && lowerTrimmed != "song" && lowerTrimmed != "video" && lowerTrimmed != "episode" && lowerTrimmed != "podcast" {
+                artist = trimmed
             }
         }
         
@@ -539,25 +615,54 @@ public actor InnerTubeClient {
             return nil
         }
         
-        // 4. High-Res Artwork extraction
+        // 4. High-Res Artwork extraction with guaranteed CDN fallback
         var artworkURL: URL?
-        if let thumbnailContainer = renderer["thumbnail"] as? [String: Any],
-           let musicThumbnail = thumbnailContainer["musicThumbnailRenderer"] as? [String: Any],
-           let thumbnail = musicThumbnail["thumbnail"] as? [String: Any],
-           let thumbnails = thumbnail["thumbnails"] as? [[String: Any]],
-           let bestThumb = thumbnails.last,
-           let urlString = bestThumb["url"] as? String {
-            artworkURL = Self.highResArtworkURL(from: urlString)
+        var isOfficialMusicCDN = false
+        
+        if let thumbnailContainer = renderer["thumbnail"] as? [String: Any] {
+            var rawUrl: String?
+            if let musicThumbnail = thumbnailContainer["musicThumbnailRenderer"] as? [String: Any],
+               let thumbnail = musicThumbnail["thumbnail"] as? [String: Any],
+               let thumbnails = thumbnail["thumbnails"] as? [[String: Any]],
+               let last = thumbnails.last {
+                rawUrl = last["url"] as? String
+            } else if let squareThumb = thumbnailContainer["croppedSquareThumbnailRenderer"] as? [String: Any],
+                      let thumbnail = squareThumb["thumbnail"] as? [String: Any],
+                      let thumbnails = thumbnail["thumbnails"] as? [[String: Any]],
+                      let last = thumbnails.last {
+                rawUrl = last["url"] as? String
+            } else if let thumbnail = thumbnailContainer["thumbnail"] as? [String: Any],
+                      let thumbnails = thumbnail["thumbnails"] as? [[String: Any]],
+                      let last = thumbnails.last {
+                rawUrl = last["url"] as? String
+            } else if let thumbnails = thumbnailContainer["thumbnails"] as? [[String: Any]],
+                      let last = thumbnails.last {
+                rawUrl = last["url"] as? String
+            }
+            if let rawUrl = rawUrl {
+                if rawUrl.contains("googleusercontent.com") || rawUrl.contains("ggpht.com") {
+                    isOfficialMusicCDN = true
+                }
+                artworkURL = Self.highResArtworkURL(from: rawUrl)
+            }
+        }
+        if artworkURL == nil {
+            artworkURL = URL(string: "https://i.ytimg.com/vi/\(validId)/hqdefault.jpg")
         }
         
-        // Exclude talk shows, debates, and podcasts (> 20 mins or metadata flags)
-        if durationSeconds > 1200 { return nil }
-        let lowerTitle = title.lowercased()
-        if lowerTitle.contains("podcast") || lowerTitle.contains("episode") || lowerTitle.contains("debate") || lowerTitle.contains("interview") {
-            return nil
-        }
+        // Video Classification:
+        let hasVideoTitle = lowerTitle.contains("(official video)") ||
+                            lowerTitle.contains("(official music video)") ||
+                            lowerTitle.contains("(music video)") ||
+                            lowerTitle.contains("(video)") ||
+                            lowerTitle.contains("(live)") ||
+                            lowerTitle.contains("(lyric video)") ||
+                            lowerTitle.contains("(dance video)") ||
+                            lowerTitle.contains("official video")
         
-        return Track(
+        let isVideo = isExplicitVideo || hasVideoTitle || (!isExplicitSong && !isOfficialMusicCDN)
+        
+        let track = Track(
             id: validId,
             title: title,
             artist: artist,
@@ -567,6 +672,8 @@ public actor InnerTubeClient {
             streamURL: nil,
             audioFormat: "AAC 128kbps"
         )
+        
+        return (track: track, isVideo: isVideo)
     }
     
     /// Parses YouTube Music's algorithmic radio and Up-Next items (`playlistPanelVideoRenderer`)
@@ -587,14 +694,37 @@ public actor InnerTubeClient {
         
         // Artist
         var artist = "YouTube Music"
-        if let shortByline = renderer["shortBylineText"] as? [String: Any],
-           let runs = shortByline["runs"] as? [[String: Any]],
-           let first = runs.first?["text"] as? String {
-            artist = first.trimmingCharacters(in: .whitespacesAndNewlines)
-        } else if let longByline = renderer["longBylineText"] as? [String: Any],
-                  let runs = longByline["runs"] as? [[String: Any]],
-                  let first = runs.first?["text"] as? String {
-            artist = first.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let shortByline = renderer["shortBylineText"] as? [String: Any] {
+            if let runs = shortByline["runs"] as? [[String: Any]], let first = runs.first?["text"] as? String {
+                artist = first.trimmingCharacters(in: .whitespacesAndNewlines)
+            } else if let simple = shortByline["simpleText"] as? String {
+                artist = simple.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        } else if let longByline = renderer["longBylineText"] as? [String: Any] {
+            if let runs = longByline["runs"] as? [[String: Any]], let first = runs.first?["text"] as? String {
+                artist = first.trimmingCharacters(in: .whitespacesAndNewlines)
+            } else if let simple = longByline["simpleText"] as? String {
+                artist = simple.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        } else if let subtitle = renderer["subtitle"] as? [String: Any] {
+            if let runs = subtitle["runs"] as? [[String: Any]], let first = runs.first?["text"] as? String {
+                artist = first.trimmingCharacters(in: .whitespacesAndNewlines)
+            } else if let simple = subtitle["simpleText"] as? String {
+                artist = simple.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+        
+        // Handle "Artist - Title" in title if artist is generic
+        if title.contains(" - ") {
+            let parts = title.components(separatedBy: " - ")
+            if parts.count == 2 {
+                let candidateArtist = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
+                let candidateTitle = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+                if artist == "YouTube Music" || artist.lowercased() == "song" || artist.lowercased() == "video" || artist.isEmpty {
+                    artist = candidateArtist
+                    title = candidateTitle
+                }
+            }
         }
         
         // Duration
@@ -618,11 +748,23 @@ public actor InnerTubeClient {
         
         // Artwork
         var artworkURL: URL?
-        if let thumbContainer = renderer["thumbnail"] as? [String: Any],
-           let thumbnails = thumbContainer["thumbnails"] as? [[String: Any]],
-           let best = thumbnails.last,
-           let urlString = best["url"] as? String {
-            artworkURL = Self.highResArtworkURL(from: urlString)
+        if let thumbContainer = renderer["thumbnail"] as? [String: Any] {
+            var rawUrl: String?
+            if let thumbnails = thumbContainer["thumbnails"] as? [[String: Any]],
+               let best = thumbnails.last {
+                rawUrl = best["url"] as? String
+            } else if let squareThumb = thumbContainer["croppedSquareThumbnailRenderer"] as? [String: Any],
+                      let thumbnail = squareThumb["thumbnail"] as? [String: Any],
+                      let thumbnails = thumbnail["thumbnails"] as? [[String: Any]],
+                      let last = thumbnails.last {
+                rawUrl = last["url"] as? String
+            }
+            if let rawUrl = rawUrl {
+                artworkURL = Self.highResArtworkURL(from: rawUrl)
+            }
+        }
+        if artworkURL == nil {
+            artworkURL = URL(string: "https://i.ytimg.com/vi/\(videoId)/hqdefault.jpg")
         }
         
         // Exclude talk shows, debates, and podcasts (> 20 mins or metadata flags)

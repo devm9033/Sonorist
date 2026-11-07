@@ -15,11 +15,14 @@ Package.resolved
 .swiftpm/
 
 # Xcode & Build Artifacts
-*.xcodeproj
-*.xcworkspace
 *.xcuserdatad
 xcuserdata/
+*.xcuserstate
 DerivedData/
+build/DerivedData/
+build/Sonorist_mac
+build/SonoristMobilePreview
+simulator_screenshot.png
 
 # Release Outputs & Disk Images (keep release assets managed via build/ or CI)
 *.app
@@ -27,6 +30,7 @@ DerivedData/
 *.zip
 *.tar.gz
 *.pkg
+SonoristMobilePreview
 
 # Test & Temporary Files
 /tmp/

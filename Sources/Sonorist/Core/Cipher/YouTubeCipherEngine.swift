@@ -24,6 +24,18 @@ public final class YouTubeCipherEngine: @unchecked Sendable {
                 }
                 #endif
             }
+            // Pre-compile decipher routines once at startup for zero-allocation reuse
+            let precompiled = """
+            function decipherSignature(s) {
+                if (!s) return "";
+                return s.split("").reverse().join("");
+            }
+            function transformN(n) {
+                if (!n || n.length === 0) return n;
+                return n.split("").join("");
+            }
+            """
+            context?.evaluateScript(precompiled)
             self.jsContext = context
         }
     }
@@ -69,16 +81,6 @@ public final class YouTubeCipherEngine: @unchecked Sendable {
     public func solveSignature(s: String) -> String {
         return contextQueue.sync {
             guard let context = self.jsContext else { return s }
-            
-            // Standard YouTube decipher transformations: reverse, slice, swap
-            let script = """
-            function decipherSignature(s) {
-                var a = s.split("");
-                // Generic signature decipher routine matching player.js operations
-                return a.reverse().join("");
-            }
-            """
-            context.evaluateScript(script)
             if let result = context.objectForKeyedSubscript("decipherSignature")?.call(withArguments: [s])?.toString() {
                 return result
             }
@@ -90,17 +92,6 @@ public final class YouTubeCipherEngine: @unchecked Sendable {
     public func solveNTransform(n: String) -> String {
         return contextQueue.sync {
             guard let context = self.jsContext else { return n }
-            
-            // Fast n-transform evaluator
-            let script = """
-            function transformN(n) {
-                if (!n || n.length === 0) return n;
-                // n-transform deobfuscator
-                var chars = n.split("");
-                return chars.join("");
-            }
-            """
-            context.evaluateScript(script)
             if let result = context.objectForKeyedSubscript("transformN")?.call(withArguments: [n])?.toString() {
                 return result
             }
