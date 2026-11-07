@@ -7,7 +7,7 @@
 [![macOS 14+](https://img.shields.io/badge/macOS-14.0%2B-black?style=flat&logo=apple)](https://apple.com)
 [![Swift 5.9](https://img.shields.io/badge/Swift-5.9%2B-orange?style=flat&logo=swift)](https://swift.org)
 [![Version 2.2.0](https://img.shields.io/badge/Version-2.2.0-blue?style=flat)](Info.plist)
-[![Tests Passing](https://img.shields.io/badge/Tests-43%2F43%20Passed-brightgreen?style=flat)](Tests/)
+[![Tests Passing](https://img.shields.io/badge/Tests-49%2F49%20Passed-brightgreen?style=flat)](Tests/)
 [![License MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Zero Telemetry](https://img.shields.io/badge/Privacy-100%25%20Local-success?style=flat&logo=apple)](README.md#%EF%B8%8F-security--privacy-architecture)
 
@@ -18,15 +18,21 @@
 Sonorist is now officially available for **iOS (iPhone & iPad)**, bringing Apple-native design engineering to mobile streaming:
 
 * **Apple Music-Inspired Native UI:** Custom full-screen Now Playing sheet crafted with authentic Apple Human Interface Guidelines, translucent Liquid Glass materials (`ultraThinMaterial`), dynamic ambient mesh illumination, and responsive portrait layouts.
-* **Directional Album Art Crossfading:** When automated or manual crossfade occurs, outgoing album artwork gracefully slides left and dissolves while incoming album artwork smoothly enters from the right, accompanied by audio volume blending.
-* **Direct Manipulation & WWDC Fluid Physics:**
-  * Flick album art left to forcefully jump to the next song instantly.
-  * Flick right to jump to the previous song.
-  * Apple WWDC 2018 Fluid Interfaces rubber-banding formula at queue boundaries: swiping right at the start of a queue provides progressive physical resistance and snaps back with zero wrap-around to the end of the queue.
+* **Clean Launch Zero-State & MiniPlayer Lifecycle:**
+  * Clean, unencumbered Day-1 launch opening directly to Search with zero player banners or popups blocking the screen.
+  * MiniPlayer automatically materializes with a fluid spring when any song is tapped.
+  * Downward flick gesture smoothly sinks the MiniPlayer capsule into the Tab Bar and dismisses it when idle or paused.
+* **Interactive Album Art Gestures & Physics:**
+  * **Tap-to-Pause/Resume:** Tapping the album artwork toggles playback with a tactile spring scale animation ($1.0 \leftrightarrow 0.92$).
+  * **Pure Horizontal Slide & Fade:** Dragging or flicking artwork glides along the X-axis with zero rotational tilt or visual jump.
+  * **WWDC Fluid Interfaces Rubber-Banding:** Boundary resistance at queue edges with smooth cushioned spring return.
+* **Top Header Ergonomics:**
+  * **Top-Left Direct Share Button:** Quick-access native iOS `ShareLink` (`square.and.arrow.up`).
+  * **Top-Right Bedtime Sleep Timer:** One-tap sleep timer access with active timer badge and quick Equalizer shortcut.
+  * **Dead-Center Source Indicator:** Symmetrical $44\,\text{pt}$ actions ensure source labels and album names remain 100% centered.
 * **Continuous Background Playback & Dynamic Island:**
   * Fully backgrounded audio playback via `AVInitialRouteSharingPolicy: LongformAudio`.
   * Real-time Lock Screen & Dynamic Island media controls, scrubber synchronization, and route management (AirPods, iPhone Speaker, Bluetooth, CarPlay).
-* **Now Playing Sleep Timer:** Integrated bedtime sleep timer accessible directly from the top-left of the Now Playing sheet, featuring a smooth 5-second logarithmic volume fade-out.
 * **Automatic Silent Offline Caching:** Songs played during online streaming are automatically bundled and compressed into proprietary `.sonorist` files in the background—no manual download button clicks required.
 
 ---
@@ -80,7 +86,7 @@ Sonorist brings together modern audio engineering and Apple design principles:
 
 ## 🛡️ Security, Penetration Testing & Privacy Architecture
 
-Sonorist has been audited against penetration and security test vectors with a **100% pass rate (43/43 tests)**:
+Sonorist has been audited against penetration, stress, and security test vectors with a **100% pass rate (49/49 tests)**:
 
 * **100% Local Privacy & Zero Telemetry:** Sonorist contains zero analytics SDKs, zero crash beacons, and zero telemetry trackers. All play counts, history, offline compressed tracks, and audio settings are stored strictly in the local sandboxed application directory.
 * **Zero Private Data Transmitted:** Outgoing network traffic is strictly confined to official YouTube/InnerTube endpoints for search/streams and open LRCLIB endpoints for lyrics. No user machine identity, IP logs, credentials, or personal tokens are ever transmitted.
