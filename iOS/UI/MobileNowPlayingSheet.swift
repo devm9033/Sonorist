@@ -1200,7 +1200,45 @@ private struct NowPlayingHeaderRow: View, Equatable {
 
     var body: some View {
         HStack {
-            // Bedtime Sleep Timer Button (Top-Left Quick Access)
+            // Direct Share Button (Top-Left Quick Access)
+            if let track = currentTrack, let shareURL = URL(string: "https://music.youtube.com/watch?v=\(track.id)") {
+                ShareLink(
+                    item: shareURL,
+                    subject: Text(track.title),
+                    message: Text("Listen to \(track.title) by \(track.artist) on Sonorist")
+                ) {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 19, weight: .medium))
+                        .foregroundColor(colorScheme == .light ? .secondary : .white.opacity(0.8))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(PlainButtonStyle())
+                .accessibilityLabel("Share Song")
+            } else {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 19, weight: .medium))
+                    .foregroundColor(colorScheme == .light ? .secondary.opacity(0.35) : .white.opacity(0.35))
+                    .frame(width: 44, height: 44)
+            }
+
+            Spacer()
+
+            VStack(spacing: 2) {
+                Text(isOffline ? "PLAYING OFFLINE" : "PLAYING FROM")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .foregroundColor(colorScheme == .light ? .secondary : .white.opacity(0.55))
+                    .tracking(1.0)
+
+                Text(albumTitle)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(colorScheme == .light ? .primary : .white)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            // Bedtime Sleep Timer Button (Top-Right Quick Access)
             Button {
                 MobileHaptics.trigger(.selection)
                 MobileNowPlayingSheetModel.shared.showSleepTimerSheet = true
@@ -1219,28 +1257,18 @@ private struct NowPlayingHeaderRow: View, Equatable {
                             .padding(.trailing, 9)
                     }
                 }
+                .contentShape(Rectangle())
             }
             .buttonStyle(PlainButtonStyle())
             .accessibilityLabel(player.sleepTimerRemainingSeconds > 0 ? "Sleep Timer: \(player.formattedSleepTimerRemaining)" : "Sleep Timer")
-
-            Spacer()
-
-            VStack(spacing: 2) {
-                Text(isOffline ? "PLAYING OFFLINE" : "PLAYING FROM")
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .foregroundColor(colorScheme == .light ? .secondary : .white.opacity(0.55))
-                    .tracking(1.0)
-
-                Text(albumTitle)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(colorScheme == .light ? .primary : .white)
-                    .lineLimit(1)
+            .contextMenu {
+                Button {
+                    MobileHaptics.trigger(.selection)
+                    MobileNowPlayingSheetModel.shared.showEqualizerSheet = true
+                } label: {
+                    Label("Equalizer (\(player.equalizerPreset))", systemImage: "slider.vertical.3")
+                }
             }
-
-            Spacer()
-
-            NowPlayingEllipsisMenu(track: currentTrack)
-                .equatable()
         }
         .frame(width: width)
     }

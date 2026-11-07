@@ -49,9 +49,12 @@ public enum SecurityAudit {
         return url
     }
     
-    /// Sanitizes user search queries or ID strings against injection and control characters
+    /// Sanitizes user search queries or ID strings against injection, path traversal and control characters
     public static func sanitizeSearchQuery(_ query: String) -> String {
         let sanitized = query
+            .replacingOccurrences(of: "../", with: "")
+            .replacingOccurrences(of: "..\\", with: "")
+            .replacingOccurrences(of: "\0", with: "")
             .components(separatedBy: .controlCharacters)
             .joined()
             .trimmingCharacters(in: .whitespacesAndNewlines)

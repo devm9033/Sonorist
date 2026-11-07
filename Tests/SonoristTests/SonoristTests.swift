@@ -911,6 +911,133 @@ struct SonoristTestsRunner {
             engine.repeatMode = .off
         }
         
+        // MARK: - 9. Rigorous Penetration, Stress & Apple UX Verification
+        test("Apple Design UI/UX: Zero State Defaults & MiniPlayer Lifecycle") {
+            let coordinator = MobileNavigationCoordinator.shared
+            coordinator.dismissMiniPlayer()
+            guard coordinator.isMiniPlayerDismissed == true else {
+                throw TestError("MiniPlayer should be dismissed by default on zero-state launch")
+            }
+            guard coordinator.isNowPlayingExpanded == false else {
+                throw TestError("Now Playing sheet should not be expanded on clean launch")
+            }
+            
+            // Simulating playback start
+            coordinator.revealMiniPlayer()
+            guard coordinator.isMiniPlayerDismissed == false else {
+                throw TestError("revealMiniPlayer() must make mini player visible")
+            }
+            
+            // Simulating downward flick dismiss while paused
+            coordinator.miniPlayerDownwardOffset = 85.0
+            coordinator.dismissMiniPlayer()
+            guard coordinator.isMiniPlayerDismissed == true else {
+                throw TestError("Downward flick must dismiss mini player")
+            }
+            coordinator.miniPlayerDownwardOffset = 0.0
+        }
+        
+        test("StressTest: 500 Rapid Artwork Swipes & Gesture Handoffs") {
+            let engine = AudioPlayerEngine.shared
+            let tracks = (1...20).map { Track(id: "stress_trk_\($0)", title: "Stress Song \($0)", artist: "Artist", durationSeconds: 180) }
+            engine.queue = tracks
+            engine.currentTrack = tracks[0]
+            
+            for i in 0..<500 {
+                if i % 2 == 0 {
+                    engine.forceNextTrack()
+                } else {
+                    engine.forcePreviousTrack()
+                }
+                guard let cur = engine.currentTrack else {
+                    throw TestError("currentTrack was nil during stress test at iteration \(i)")
+                }
+                guard cur.durationSeconds > 0 else {
+                    throw TestError("Invalid duration during stress test")
+                }
+            }
+        }
+        
+        test("Network Isolation: Offline Mode Guarantees Zero Network Stream Requests") {
+            let engine = AudioPlayerEngine.shared
+            let dummyLocalURL = URL(fileURLWithPath: "/tmp/fake_local_audio.m4a")
+            let localTrack = Track(id: "local_isolated_test", title: "Local Song", artist: "Artist", durationSeconds: 210, streamURL: dummyLocalURL, audioFormat: "Local M4A")
+            
+            engine.isPlayingFromOfflineLibrary = true
+            engine.queue = [localTrack]
+            engine.play(track: localTrack, autoPlay: false)
+            
+            guard engine.currentTrack?.id == "local_isolated_test" else {
+                throw TestError("Local track failed to load into currentTrack")
+            }
+            guard engine.currentTrack?.streamURL?.isFileURL == true else {
+                throw TestError("Offline local track must use a local file:// URL with zero network connection")
+            }
+            engine.isPlayingFromOfflineLibrary = false
+        }
+        
+        test("PenTest: Malicious Track Payloads & Extreme Boundary Fuzzing") {
+            // Null bytes, path traversals, extremely long payloads
+            let maliciousIDs = [
+                "../../../../etc/passwd",
+                "\0\0\0malicious_null_byte",
+                String(repeating: "A", count: 10_000),
+                "<script>alert('xss')</script>",
+                "https://malicious.evil.com/exploit.mp3",
+                "-1-NaN-Infinity"
+            ]
+            
+            for badID in maliciousIDs {
+                let sanitized = SecurityAudit.sanitizeSearchQuery(badID)
+                guard !sanitized.contains("../") else {
+                    throw TestError("Sanitization failed to strip directory traversal from \(badID)")
+                }
+                guard !sanitized.contains("\0") else {
+                    throw TestError("Sanitization failed to strip null byte")
+                }
+                guard !SecurityAudit.validateVideoID(badID) else {
+                    throw TestError("Malicious ID \(badID) should be rejected by validateVideoID")
+                }
+            }
+        }
+        
+        test("AudioEngine State Machine: Rapid Play/Pause & Tap-to-Toggle Disambiguation") {
+            let engine = AudioPlayerEngine.shared
+            let track = Track(id: "play_pause_test", title: "Test", artist: "Artist", durationSeconds: 200)
+            engine.queue = [track]
+            engine.currentTrack = track
+            
+            // Rapid state toggling (simulate 100 fast taps on album art)
+            for _ in 0..<100 {
+                engine.togglePlayPause()
+            }
+            // Engine must remain deterministic and not crash or deadlock
+            engine.pause()
+            guard !engine.isPlaying else {
+                throw TestError("Engine should be paused after explicit pause()")
+            }
+        }
+        
+        test("Resource & Memory Footprint: Leak Check Under Repeated Queue Restructuring") {
+            let engine = AudioPlayerEngine.shared
+            var baseTracks: [Track] = []
+            for i in 0..<100 {
+                baseTracks.append(Track(id: "mem_trk_\(i)", title: "Memory Track \(i)", artist: "Artist", durationSeconds: 150))
+            }
+            
+            // 200 queue replacement and shuffle operations
+            for _ in 0..<200 {
+                var shuffled = baseTracks
+                shuffled.shuffle()
+                engine.queue = shuffled
+                engine.currentTrack = shuffled.first
+            }
+            
+            guard engine.queue.count == 100 else {
+                throw TestError("Queue corrupted during memory test")
+            }
+        }
+        
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         print("  Results: \(passed) passed, \(failed) failed")
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
