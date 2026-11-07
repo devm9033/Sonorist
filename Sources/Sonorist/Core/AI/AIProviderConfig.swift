@@ -52,7 +52,7 @@ public final class AIProviderConfig: ObservableObject, @unchecked Sendable {
     private let keyProvider = "Sonorist_AIProvider"
     private let keyApiKey = "Sonorist_AIApiKey"
     private let keyAutoDownload = "Sonorist_AIAutoDownload"
-    private let keyDailyRefresh = "Sonorist_AIDailyRefresh"
+    private let keyAutoRetryPending = "Sonorist_AIAutoRetryPending"
     private let keyLastSync = "Sonorist_AILastSync"
     private let keyCustomEndpoint = "Sonorist_AICustomEndpoint"
 
@@ -68,8 +68,13 @@ public final class AIProviderConfig: ObservableObject, @unchecked Sendable {
         didSet { defaults.set(isAutoCurateOnDownloadEnabled, forKey: keyAutoDownload) }
     }
 
-    @Published public var isDailyRefreshEnabled: Bool {
-        didSet { defaults.set(isDailyRefreshEnabled, forKey: keyDailyRefresh) }
+    @Published public var isAutoRetryPendingEnabled: Bool {
+        didSet { defaults.set(isAutoRetryPendingEnabled, forKey: keyAutoRetryPending) }
+    }
+
+    public var isDailyRefreshEnabled: Bool {
+        get { isAutoRetryPendingEnabled }
+        set { isAutoRetryPendingEnabled = newValue }
     }
 
     @Published public var customEndpoint: String {
@@ -90,7 +95,7 @@ public final class AIProviderConfig: ObservableObject, @unchecked Sendable {
         self.selectedProvider = AIProvider(rawValue: provStr) ?? .gemini
         self.apiKey = defaults.string(forKey: keyApiKey) ?? ""
         self.isAutoCurateOnDownloadEnabled = defaults.object(forKey: keyAutoDownload) as? Bool ?? true
-        self.isDailyRefreshEnabled = defaults.object(forKey: keyDailyRefresh) as? Bool ?? true
+        self.isAutoRetryPendingEnabled = defaults.object(forKey: keyAutoRetryPending) as? Bool ?? true
         self.customEndpoint = defaults.string(forKey: keyCustomEndpoint) ?? ""
 
         if let time = defaults.object(forKey: keyLastSync) as? Double {

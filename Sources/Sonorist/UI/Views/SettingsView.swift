@@ -247,16 +247,16 @@ public struct SettingsView: View {
                     
                     HStack {
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("Daily Auto-Refresh")
+                            Text("Auto-Sync Pending Tracks")
                                 .font(.system(size: 13, weight: .medium))
-                            Text("Verifies and reorganizes offline playlists once every 24 hours.")
+                            Text("Automatically processes tracks from the outbox queue when connected.")
                                 .font(.system(size: 11))
                                 .foregroundColor(.secondary)
                         }
                         Spacer()
                         Toggle("", isOn: Binding(
-                            get: { AIProviderConfig.shared.isDailyRefreshEnabled },
-                            set: { AIProviderConfig.shared.isDailyRefreshEnabled = $0; FluidHaptics.toggle() }
+                            get: { AIProviderConfig.shared.isAutoRetryPendingEnabled },
+                            set: { AIProviderConfig.shared.isAutoRetryPendingEnabled = $0; FluidHaptics.toggle() }
                         ))
                         .labelsHidden()
                         .toggleStyle(SwitchToggleStyle(tint: FluidTheme.musicRed))

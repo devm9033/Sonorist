@@ -81,7 +81,7 @@ public struct AICuratedPlaylistsFolderView: View {
                 AISettingsSheet()
             }
             .task {
-                await engine.performDailySyncIfNeeded()
+                await engine.processPendingQueueIfNeeded()
             }
         }
     }
@@ -115,8 +115,16 @@ public struct AICuratedPlaylistsFolderView: View {
                                 .background(Color.green.opacity(0.15))
                                 .clipShape(Capsule())
                         }
-                        if let lastSync = config.lastSyncDate {
-                            Text("Last organized \(lastSync.formatted(date: .abbreviated, time: .shortened))")
+                        if !engine.pendingQueue.isEmpty {
+                            HStack(spacing: 4) {
+                                Image(systemName: "clock.arrow.circlepath")
+                                    .font(.system(size: 11))
+                                Text("\(engine.pendingQueue.count) pending outbox sync")
+                                    .font(.system(size: 11, weight: .medium))
+                            }
+                            .foregroundColor(.orange)
+                        } else if let lastSync = config.lastSyncDate {
+                            Text("All downloaded tracks synchronized")
                                 .font(.system(size: 12))
                                 .foregroundColor(.secondary)
                         } else {
@@ -590,11 +598,47 @@ public struct AISettingsSheet: View {
                         .font(.system(size: 12))
                         .foregroundColor(.secondary)
 
-                    Toggle("Daily Auto-Refresh", isOn: $config.isDailyRefreshEnabled)
+                    Toggle("Auto-Sync Pending Tracks", isOn: $config.isAutoRetryPendingEnabled)
                         .tint(FluidTheme.musicRed)
-                    Text("Silently updates and verifies your library once every 24 hours.")
+                    Text("Retries pending tracks from the outbox log automatically when connected to internet.")
                         .font(.system(size: 12))
                         .foregroundColor(.secondary)
+                }
+
+                // Outbox Sync Queue Section
+                Section("Outbox Sync Queue") {
+                    HStack {
+                        Text("Queue Status")
+                        Spacer()
+                        if engine.pendingQueue.isEmpty {
+                            Text("Clean (0 pending)")
+                                .foregroundColor(.secondary)
+                        } else {
+                            Text("\(engine.pendingQueue.count) pending sync")
+                                .foregroundColor(FluidTheme.musicRed)
+                                .fontWeight(.medium)
+                        }
+                    }
+
+                    if !engine.pendingQueue.isEmpty {
+                        Button {
+                            MobileHaptics.trigger(.medium)
+                            Task {
+                                await engine.processPendingQueueIfNeeded()
+                            }
+                        } label: {
+                            HStack {
+                                if engine.isProcessingPendingQueue {
+                                    ProgressView()
+                                        .padding(.trailing, 6)
+                                }
+                                Text("Sync Pending Tracks Now")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(FluidTheme.musicRed)
+                            }
+                        }
+                        .disabled(engine.isProcessingPendingQueue)
+                    }
                 }
 
                 // Re-Analyze Action

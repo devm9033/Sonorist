@@ -7,7 +7,7 @@
 [![macOS 14+](https://img.shields.io/badge/macOS-14.0%2B-black?style=flat&logo=apple)](https://apple.com)
 [![Swift 5.9](https://img.shields.io/badge/Swift-5.9%2B-orange?style=flat&logo=swift)](https://swift.org)
 [![Version 2.2.0](https://img.shields.io/badge/Version-2.2.0-blue?style=flat)](Info.plist)
-[![Tests Passing](https://img.shields.io/badge/Tests-56%2F56%20Passed-brightgreen?style=flat)](Tests/)
+[![Tests Passing](https://img.shields.io/badge/Tests-57%2F57%20Passed-brightgreen?style=flat)](Tests/)
 [![License MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Zero Telemetry](https://img.shields.io/badge/Privacy-100%25%20Local-success?style=flat&logo=apple)](README.md#%EF%B8%8F-security--privacy-architecture)
 
@@ -148,7 +148,7 @@ Sonorist/
 │                              # AnalyticsView, SearchView, MiniPlayerView,
 │                              # EqualizerView, SettingsView, MenuBarView
 ├── Tests/
-│   └── SonoristTests/         # 43-test security, penetration, audio, and cache suite
+│   └── SonoristTests/         # 57-test security, penetration, audio, AI curation, and cache suite
 ├── Resources/                 # App icons and assets
 ├── Package.swift              # Swift package manifest
 ├── entitlements.plist         # Hardened runtime & network entitlements

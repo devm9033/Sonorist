@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import Network
 
 public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
     public static let shared = AIPlaylistEngine()
@@ -7,9 +8,13 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
     private let config = AIProviderConfig.shared
     private let cacheManager = MediaCacheManager.shared
     private let queue = DispatchQueue(label: "com.sonorist.ai.playlist.queue", qos: .userInitiated)
+    private let pathMonitor = NWPathMonitor()
+    private let monitorQueue = DispatchQueue(label: "com.sonorist.ai.networkMonitor", qos: .utility)
 
     @Published public var curatedLibrary: AICuratedLibrary = AICuratedLibrary()
+    @Published public var pendingQueue: [Track] = []
     @Published public var isCurating: Bool = false
+    @Published public var isProcessingPendingQueue: Bool = false
     @Published public var lastSyncError: String?
     @Published public var showingSettingsSheet: Bool = false
     @Published public var spinRefresh: Bool = false
@@ -20,35 +25,97 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
         cacheManager.parentDirectory.appendingPathComponent("AICuratedPlaylists.json")
     }
 
+    public var pendingQueueURL: URL {
+        cacheManager.parentDirectory.appendingPathComponent("pending_curation_queue.json")
+    }
+
     private init() {
         loadCachedLibrary()
+        loadPendingQueue()
+        startNetworkMonitoring()
+    }
+
+    private func startNetworkMonitoring() {
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            guard let self = self else { return }
+            if path.status == .satisfied {
+                Task {
+                    await self.processPendingQueueIfNeeded()
+                }
+            }
+        }
+        pathMonitor.start(queue: monitorQueue)
     }
 
     // MARK: - Persistence
 
     public func loadCachedLibrary() {
+        var loaded: AICuratedLibrary?
         queue.sync {
             guard FileManager.default.fileExists(atPath: storageURL.path),
                   let data = try? Data(contentsOf: storageURL),
                   let decoded = try? JSONDecoder().decode(AICuratedLibrary.self, from: data) else {
                 return
             }
-            Task { @MainActor in
-                self.curatedLibrary = decoded
-            }
+            loaded = decoded
+        }
+        if let loaded = loaded {
+            self.curatedLibrary = loaded
         }
     }
 
-    public func saveLibrary() {
-        queue.async {
+    public func saveLibrary(sync: Bool = false) {
+        let lib = self.curatedLibrary
+        let fileURL = self.storageURL
+        let work = {
             do {
-                let data = try JSONEncoder().encode(self.curatedLibrary)
-                try data.write(to: self.storageURL, options: .atomic)
+                let data = try JSONEncoder().encode(lib)
+                try data.write(to: fileURL, options: .atomic)
             } catch {
                 #if DEBUG
                 print("[AIPlaylistEngine] Failed to save curated library: \(error)")
                 #endif
             }
+        }
+        if sync {
+            queue.sync(execute: work)
+        } else {
+            queue.async(execute: work)
+        }
+    }
+
+    public func loadPendingQueue() {
+        var loaded: [Track]?
+        queue.sync {
+            guard FileManager.default.fileExists(atPath: pendingQueueURL.path),
+                  let data = try? Data(contentsOf: pendingQueueURL),
+                  let decoded = try? JSONDecoder().decode([Track].self, from: data) else {
+                return
+            }
+            loaded = decoded
+        }
+        if let loaded = loaded {
+            self.pendingQueue = loaded
+        }
+    }
+
+    public func savePendingQueue(sync: Bool = false) {
+        let items = self.pendingQueue
+        let fileURL = self.pendingQueueURL
+        let work = {
+            do {
+                let data = try JSONEncoder().encode(items)
+                try data.write(to: fileURL, options: .atomic)
+            } catch {
+                #if DEBUG
+                print("[AIPlaylistEngine] Failed to save pending queue: \(error)")
+                #endif
+            }
+        }
+        if sync {
+            queue.sync(execute: work)
+        } else {
+            queue.async(execute: work)
         }
     }
 
@@ -105,15 +172,19 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
         }
     }
 
-    // MARK: - Instant Download Hook
+    // MARK: - Instant Download Hook & Outbox Event Architecture
 
     /// Called silently immediately upon track download completion.
+    /// Uses the active internet connection to classify with the API immediately.
+    /// If the API call fails or is unconfigured, logs the track to the outbox queue (`pending_curation_queue.json`)
+    /// and uses local heuristics so the user immediately sees the track organized without delay.
     public func categorizeNewTrack(_ track: Track) async {
         guard config.isAutoCurateOnDownloadEnabled else { return }
 
-        // If API configured, attempt fast single-track classification
+        // 1. If API is configured, attempt fast single-track classification
         if config.isConfigured {
-            if let classification = try? await querySingleTrackClassification(track: track) {
+            do {
+                let classification = try await querySingleTrackClassification(track: track)
                 Task { @MainActor in
                     self.curatedLibrary.insert(
                         trackId: track.id,
@@ -122,15 +193,32 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
                         genreIcon: classification.icon,
                         genreDescription: classification.description
                     )
+                    // Successfully classified by API: remove from pending queue if present
+                    self.pendingQueue.removeAll(where: { $0.id == track.id })
                     self.saveLibrary()
+                    self.savePendingQueue()
                 }
                 return
+            } catch {
+                #if DEBUG
+                print("[AIPlaylistEngine] Instant classification failed (\(error.localizedDescription)). Logging to pending queue.")
+                #endif
+                Task { @MainActor in
+                    self.lastSyncError = error.localizedDescription
+                }
             }
         }
 
-        // Offline / heuristic fallback
-        let fallback = classifyTrackHeuristically(track)
+        // 2. Fallback / Offline / API Unavailable:
+        // A) Record track in persistent pending outbox queue file
         Task { @MainActor in
+            if !self.pendingQueue.contains(where: { $0.id == track.id }) {
+                self.pendingQueue.append(track)
+                self.savePendingQueue()
+            }
+
+            // B) Apply immediate zero-latency local heuristic classification
+            let fallback = self.classifyTrackHeuristically(track)
             self.curatedLibrary.insert(
                 trackId: track.id,
                 language: fallback.language,
@@ -142,22 +230,84 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
         }
     }
 
-    /// Removes track when un-downloaded from library
+    /// Removes track when un-downloaded from offline library
     public func handleTrackRemoved(videoId: String) {
-        Task { @MainActor in
+        let work = {
             self.curatedLibrary.remove(trackId: videoId)
+            self.pendingQueue.removeAll(where: { $0.id == videoId })
             self.saveLibrary()
+            self.savePendingQueue()
+        }
+        if Thread.isMainThread {
+            work()
+        } else {
+            DispatchQueue.main.async(execute: work)
         }
     }
 
-    // MARK: - Daily Background Sync
+    // MARK: - Event-Driven Outbox Queue Processing
 
-    public func performDailySyncIfNeeded() async {
-        guard config.isDailyRefreshEnabled else { return }
-        if let lastSync = config.lastSyncDate, Date().timeIntervalSince(lastSync) < 86400 {
-            return // Less than 24 hours
+    /// Scans the persistent pending outbox queue log file (`pending_curation_queue.json`).
+    /// If the queue is empty, makes ZERO network requests!
+    /// If there are pending tracks, synchronizes them with the API and clears them from the log.
+    public func processPendingQueueIfNeeded() async {
+        guard config.isConfigured else { return }
+
+        let pending = await MainActor.run { self.pendingQueue }
+        guard !pending.isEmpty else {
+            // Outbox queue log is clean! Zero network calls required.
+            return
         }
-        await curateEntireLibrary(force: false)
+
+        await MainActor.run {
+            self.isProcessingPendingQueue = true
+        }
+
+        defer {
+            Task { @MainActor in
+                self.isProcessingPendingQueue = false
+            }
+        }
+
+        var successfullySynced = [String: AISongClassification]()
+
+        for track in pending {
+            do {
+                let classification = try await querySingleTrackClassification(track: track)
+                successfullySynced[track.id] = classification
+            } catch {
+                #if DEBUG
+                print("[AIPlaylistEngine] Failed to sync pending track \(track.title): \(error.localizedDescription)")
+                #endif
+                // Mid-batch network failure: halt iteration and keep remaining tracks in outbox log
+                break
+            }
+        }
+
+        if !successfullySynced.isEmpty {
+            await MainActor.run {
+                for (trackId, classification) in successfullySynced {
+                    // Remove previous heuristic placement if any
+                    self.curatedLibrary.remove(trackId: trackId)
+                    // Insert verified AI classification
+                    self.curatedLibrary.insert(
+                        trackId: trackId,
+                        language: classification.language,
+                        genreName: classification.genre,
+                        genreIcon: classification.icon,
+                        genreDescription: classification.description
+                    )
+                }
+                self.pendingQueue.removeAll(where: { successfullySynced.keys.contains($0.id) })
+                self.savePendingQueue()
+                self.saveLibrary()
+            }
+        }
+    }
+
+    /// Backward compatibility alias
+    public func performDailySyncIfNeeded() async {
+        await processPendingQueueIfNeeded()
     }
 
     // MARK: - LLM API Integration

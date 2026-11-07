@@ -1199,6 +1199,49 @@ struct SonoristTestsRunner {
             }
         }
         
+        test("AI Curated Playlists: Outbox Queue Log Persistence and Offline Retry") {
+            let engine = AIPlaylistEngine.shared
+            let testTrack1 = Track(id: "outbox_1", title: "Tum Hi Ho", artist: "Arijit Singh", durationSeconds: 210)
+            let testTrack2 = Track(id: "outbox_2", title: "Blinding Lights", artist: "The Weeknd", durationSeconds: 200)
+
+            // 1. Clear outbox and verify empty state
+            engine.pendingQueue.removeAll()
+            engine.savePendingQueue(sync: true)
+            
+            engine.loadPendingQueue()
+            guard engine.pendingQueue.isEmpty else {
+                throw TestError("Expected pending outbox queue to be empty initially")
+            }
+
+            // 2. Add pending tracks (simulating unconfigured or offline download)
+            engine.pendingQueue.append(testTrack1)
+            engine.pendingQueue.append(testTrack2)
+            engine.savePendingQueue(sync: true)
+
+            // 3. Reload from disk log file and assert persistence
+            engine.pendingQueue.removeAll()
+            engine.loadPendingQueue()
+            
+            guard engine.pendingQueue.count == 2 else {
+                throw TestError("Expected 2 tracks loaded from pending_curation_queue.json, got \(engine.pendingQueue.count)")
+            }
+            guard engine.pendingQueue.contains(where: { $0.id == "outbox_1" }) &&
+                  engine.pendingQueue.contains(where: { $0.id == "outbox_2" }) else {
+                throw TestError("Missing expected track IDs in reloaded pending queue")
+            }
+
+            // 4. Test removal on track deletion
+            engine.handleTrackRemoved(videoId: "outbox_1")
+            
+            guard engine.pendingQueue.count == 1 && engine.pendingQueue.first?.id == "outbox_2" else {
+                throw TestError("Expected outbox_1 to be pruned from pending queue upon deletion, got \(engine.pendingQueue.map { $0.id })")
+            }
+
+            // 5. Clean up
+            engine.pendingQueue.removeAll()
+            engine.savePendingQueue(sync: true)
+        }
+        
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         print("  Results: \(passed) passed, \(failed) failed")
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
