@@ -83,7 +83,7 @@ public struct MobileSleepTimerSheet: View {
         .presentationDetents([.fraction(player.sleepTimerOption == .off ? 0.50 : 0.58)])
         .presentationDragIndicator(.visible)
         .presentationCornerRadius(28)
-        .background(isLight ? Color(UIColor.systemBackground) : FluidTheme.cardBackground)
+        .background(isLight ? Color.platformSystemBackground : FluidTheme.cardBackground)
     }
     
     private func timerRow(opt: SleepTimerOption) -> some View {

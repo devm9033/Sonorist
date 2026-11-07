@@ -5,9 +5,16 @@ public final class MobileNowPlayingSheetModel: ObservableObject {
 
     @Published public var showLyrics: Bool = false
     @Published public var dragOffset: CGFloat = 0
+
+    // Artwork Horizontal Slide & Fade Transition State
+    @Published public var isTransitioningArtwork: Bool = false
+    @Published public var transitionOutgoingTrack: Track? = nil
+    @Published public var transitionIncomingTrack: Track? = nil
+    @Published public var transitionDirection: PlaybackSlideDirection = .forward
+    @Published public var transitionProgress: CGFloat = 0.0
     @Published public var artworkDragOffset: CGFloat = 0
     @Published public var isDraggingArtwork: Bool = false
-    @Published public var isAnimatingTrackTransition: Bool = false
+
     @Published public var isSeeking: Bool = false
     @Published public var seekPosition: Double = 0
     @Published public var showQueueSheet: Bool = false
@@ -461,7 +468,7 @@ public struct MobileNowPlayingSheet: View {
         )
     }
 
-    // MARK: - Large Artwork Stage (Fluid Carousel + Directional Slide Transitions)
+    // MARK: - Large Artwork Stage (Horizontal Slide-and-Fade Transitions)
 
     @ViewBuilder
     private func singleArtworkCard(track: Track, size: CGFloat, isLight: Bool) -> some View {
@@ -473,87 +480,70 @@ public struct MobileNowPlayingSheet: View {
         )
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .shadow(color: .black.opacity(isLight ? 0.22 : 0.45), radius: 24, x: 0, y: 12)
+        .shadow(color: .black.opacity(isLight ? 0.20 : 0.40), radius: 20, x: 0, y: 10)
         .scaleEffect(player.isPlaying ? 1.0 : 0.92)
-        .animation(FluidTheme.fluidSpring, value: player.isPlaying)
     }
 
     private func largeArtworkView(size: CGFloat) -> some View {
         let isLight = colorScheme == .light
+        let travel = size * 0.75
         let nextTrack = player.getNextTrackInQueue()
         let prevTrack = player.getPreviousTrackInQueue()
-        let stride = size + 20
 
         return ZStack {
             if player.isCrossfading, let outgoing = player.outgoingTrack, let incoming = player.incomingTrack {
-                // MARK: Real-Time Audio-Synced Visual Crossfade (Natural Track End)
-                // Pure horizontal glide along X-axis with equal-power audio crossfade; NO rotation.
-                let p = player.crossfadeProgress
+                // MARK: 1. Natural Track-End Audio Crossfade
+                // Pure horizontal glide along X-axis: outgoing slides away and dissolves out, incoming enters and dissolves in
+                let p = CGFloat(player.crossfadeProgress)
                 let isFwd = player.slideDirection == .forward
-                let travel = size * 0.60
 
-                // Outgoing Album Art: slides horizontally and dissolves out
                 singleArtworkCard(track: outgoing, size: size, isLight: isLight)
                     .offset(x: isFwd ? -p * travel : p * travel)
-                    .scaleEffect(1.0 - (p * 0.08))
-                    .opacity(max(0.0, 1.0 - p))
+                    .opacity(Double(max(0.0, 1.0 - p)))
 
-                // Incoming Album Art: enters horizontally from opposite edge and dissolves inside
                 singleArtworkCard(track: incoming, size: size, isLight: isLight)
                     .offset(x: isFwd ? (1.0 - p) * travel : -(1.0 - p) * travel)
-                    .scaleEffect(0.92 + (p * 0.08))
-                    .opacity(min(1.0, p))
+                    .opacity(Double(min(1.0, p)))
 
-            } else {
-                // MARK: Unified Horizontal Rail Carousel (Buttons + Flick Gesture)
-                // Both flick gesture and transport buttons drive model.artworkDragOffset.
-                // Pure horizontal motion: no tilt, no circular stack rotation, minimalist Apple design.
-                let offset = model.artworkDragOffset
-                let isTransitioning = model.isDraggingArtwork || model.isAnimatingTrackTransition || offset != 0
+            } else if model.isTransitioningArtwork, let outgoing = model.transitionOutgoingTrack, let incoming = model.transitionIncomingTrack {
+                // MARK: 2. Active Horizontal Slide-and-Fade Transition (Buttons or Released Flick)
+                // Exactly what the user requested:
+                // One album art goes to the left/right and fades out, and from the opposite side the new album comes in and fades in!
+                let p = model.transitionProgress
+                let isFwd = model.transitionDirection == .forward
 
-                // Previous track card (sits to the left at offset - stride)
-                if let prev = prevTrack {
-                    let cardOffset = offset - stride
-                    let distFromCenter = abs(cardOffset)
-                    let normDist = min(1.0, distFromCenter / stride)
-                    let scale = 1.0 - (normDist * 0.08)
-                    let opacity = isTransitioning ? max(0.0, min(1.0, 1.0 - (normDist * 0.50))) : 0.0
+                singleArtworkCard(track: outgoing, size: size, isLight: isLight)
+                    .offset(x: isFwd ? -p * travel : p * travel)
+                    .opacity(Double(max(0.0, 1.0 - p)))
 
-                    if opacity > 0.01 {
-                        singleArtworkCard(track: prev, size: size, isLight: isLight)
-                            .offset(x: cardOffset)
-                            .scaleEffect(scale)
-                            .opacity(opacity)
-                    }
-                }
+                singleArtworkCard(track: incoming, size: size, isLight: isLight)
+                    .offset(x: isFwd ? (1.0 - p) * travel : -(1.0 - p) * travel)
+                    .opacity(Double(min(1.0, p)))
 
-                // Next track card (sits to the right at offset + stride)
-                if let next = nextTrack {
-                    let cardOffset = offset + stride
-                    let distFromCenter = abs(cardOffset)
-                    let normDist = min(1.0, distFromCenter / stride)
-                    let scale = 1.0 - (normDist * 0.08)
-                    let opacity = isTransitioning ? max(0.0, min(1.0, 1.0 - (normDist * 0.50))) : 0.0
+            } else if model.isDraggingArtwork && model.artworkDragOffset != 0 {
+                // MARK: 3. Interactive Finger Dragging State (Tracks finger 1:1)
+                let dx = model.artworkDragOffset
+                let isFwd = dx < 0
+                let p = min(1.0, max(0.0, abs(dx) / travel))
+                let targetTrack = isFwd ? nextTrack : prevTrack
 
-                    if opacity > 0.01 {
-                        singleArtworkCard(track: next, size: size, isLight: isLight)
-                            .offset(x: cardOffset)
-                            .scaleEffect(scale)
-                            .opacity(opacity)
-                    }
-                }
-
-                // Center / Active Track card (sits at offset)
                 if let current = player.currentTrack {
-                    let distFromCenter = abs(offset)
-                    let normDist = min(1.0, distFromCenter / stride)
-                    let scale = 1.0 - (normDist * 0.08)
-                    let opacity = max(0.40, 1.0 - (normDist * 0.45))
-
                     singleArtworkCard(track: current, size: size, isLight: isLight)
-                        .offset(x: offset)
-                        .scaleEffect(scale)
-                        .opacity(opacity)
+                        .offset(x: dx)
+                        .opacity(targetTrack != nil ? Double(max(0.0, 1.0 - p)) : 1.0)
+                }
+
+                if let target = targetTrack {
+                    singleArtworkCard(track: target, size: size, isLight: isLight)
+                        .offset(x: isFwd ? travel + dx : -travel + dx)
+                        .opacity(Double(p))
+                }
+            } else {
+                // MARK: 4. Steady State (Only current track, centered, fully opaque)
+                if let current = player.currentTrack {
+                    singleArtworkCard(track: current, size: size, isLight: isLight)
+                        .offset(x: 0)
+                        .opacity(1.0)
                 } else {
                     RoundedRectangle(cornerRadius: 22, style: .continuous)
                         .fill(Color.white.opacity(0.1))
@@ -567,13 +557,12 @@ public struct MobileNowPlayingSheet: View {
             DragGesture(minimumDistance: 8)
                 .onChanged { value in
                     guard !model.showLyrics else { return }
-                    guard !model.isAnimatingTrackTransition else { return }
+                    guard !model.isTransitioningArtwork else { return }
 
                     let dx = value.translation.width
                     let dy = value.translation.height
 
                     if !model.isDraggingArtwork {
-                        // Disambiguate: only capture horizontal swipes, leave vertical for pull-to-dismiss
                         if abs(dx) > abs(dy) * 1.1 && abs(dx) > 8 {
                             model.isDraggingArtwork = true
                         }
@@ -581,15 +570,11 @@ public struct MobileNowPlayingSheet: View {
 
                     guard model.isDraggingArtwork else { return }
 
-                    // Progressive physical rubber-banding resistance at boundaries (Apple HIG: very gentle reaction, max ~20pt)
-                    if dx > 0 && prevTrack == nil {
-                        let absDx = abs(dx)
-                        let rubberBanded = min(20.0, pow(absDx, 0.6) * 1.1)
-                        model.artworkDragOffset = rubberBanded
-                    } else if dx < 0 && nextTrack == nil {
-                        let absDx = abs(dx)
-                        let rubberBanded = min(20.0, pow(absDx, 0.6) * 1.1)
-                        model.artworkDragOffset = -rubberBanded
+                    // Rubber-band resistance at boundaries if no track exists in that direction
+                    if dx < 0 && nextTrack == nil {
+                        model.artworkDragOffset = -min(20.0, pow(abs(dx), 0.6) * 1.1)
+                    } else if dx > 0 && prevTrack == nil {
+                        model.artworkDragOffset = min(20.0, pow(abs(dx), 0.6) * 1.1)
                     } else {
                         model.artworkDragOffset = dx
                     }
@@ -600,18 +585,15 @@ public struct MobileNowPlayingSheet: View {
                     let dx = model.artworkDragOffset
                     let predicted = value.predictedEndTranslation.width
                     let threshold: CGFloat = 55
-                    let stride = size + 20
 
                     // 1. Boundary on first track: pulling right when no previous track exists
                     if dx > 0 && prevTrack == nil {
                         MobileHaptics.trigger(.selection)
-                        if player.currentTime > 0 {
-                            player.seek(to: 0)
-                        }
-                        withAnimation(.spring(response: 0.55, dampingFraction: 0.88, blendDuration: 0.1)) {
+                        if player.currentTime > 0 { player.seek(to: 0) }
+                        withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
                             model.artworkDragOffset = 0
                         }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.30) {
                             model.isDraggingArtwork = false
                         }
                         return
@@ -620,45 +602,69 @@ public struct MobileNowPlayingSheet: View {
                     // 2. Boundary on last track: pulling left when no next track exists
                     if dx < 0 && nextTrack == nil {
                         MobileHaptics.trigger(.selection)
-                        withAnimation(.spring(response: 0.55, dampingFraction: 0.88, blendDuration: 0.1)) {
+                        withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
                             model.artworkDragOffset = 0
                         }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.30) {
                             model.isDraggingArtwork = false
                         }
                         return
                     }
 
-                    // 3. Flick Left -> Smoothly continue sliding out to left, slide next track into center
-                    if (dx < -threshold || predicted < -120), let next = nextTrack {
+                    // 3. Flick / Swipe Left -> Next Track (Smooth slide out to left, slide in from right)
+                    if (dx < -threshold || predicted < -100), let next = nextTrack {
                         MobileHaptics.trigger(.medium)
-                        withAnimation(FluidTheme.fluidSpring) {
-                            model.artworkDragOffset = -stride
+                        let startProgress = min(1.0, max(0.0, abs(dx) / travel))
+                        model.isDraggingArtwork = false
+                        model.artworkDragOffset = 0
+                        model.transitionOutgoingTrack = player.currentTrack
+                        model.transitionIncomingTrack = next
+                        model.transitionDirection = .forward
+                        model.transitionProgress = startProgress
+                        model.isTransitioningArtwork = true
+
+                        let remainingDuration = max(0.12, 0.24 * Double(1.0 - startProgress))
+                        withAnimation(.easeOut(duration: remainingDuration)) {
+                            model.transitionProgress = 1.0
                         }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.30) {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + remainingDuration) {
                             player.slideDirection = .forward
                             player.forceNextTrack()
-                            model.artworkDragOffset = 0
-                            model.isDraggingArtwork = false
+                            model.isTransitioningArtwork = false
+                            model.transitionOutgoingTrack = nil
+                            model.transitionIncomingTrack = nil
+                            model.transitionProgress = 0.0
                         }
-                    } else if (dx > threshold || predicted > 120), let prev = prevTrack {
-                        // 4. Flick Right -> Smoothly continue sliding out to right, slide previous track into center
+                    } else if (dx > threshold || predicted > 100), let prev = prevTrack {
+                        // 4. Flick / Swipe Right -> Previous Track (Smooth slide out to right, slide in from left)
                         MobileHaptics.trigger(.medium)
-                        withAnimation(FluidTheme.fluidSpring) {
-                            model.artworkDragOffset = stride
+                        let startProgress = min(1.0, max(0.0, dx / travel))
+                        model.isDraggingArtwork = false
+                        model.artworkDragOffset = 0
+                        model.transitionOutgoingTrack = player.currentTrack
+                        model.transitionIncomingTrack = prev
+                        model.transitionDirection = .backward
+                        model.transitionProgress = startProgress
+                        model.isTransitioningArtwork = true
+
+                        let remainingDuration = max(0.12, 0.24 * Double(1.0 - startProgress))
+                        withAnimation(.easeOut(duration: remainingDuration)) {
+                            model.transitionProgress = 1.0
                         }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.30) {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + remainingDuration) {
                             player.slideDirection = .backward
                             player.forcePreviousTrack()
-                            model.artworkDragOffset = 0
-                            model.isDraggingArtwork = false
+                            model.isTransitioningArtwork = false
+                            model.transitionOutgoingTrack = nil
+                            model.transitionIncomingTrack = nil
+                            model.transitionProgress = 0.0
                         }
                     } else {
                         // 5. Incomplete gesture -> smoothly return current card to center
-                        withAnimation(FluidTheme.fluidSpring) {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                             model.artworkDragOffset = 0
                         }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.30) {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                             model.isDraggingArtwork = false
                         }
                     }
@@ -853,17 +859,17 @@ public struct MobileNowPlayingSheet: View {
         .frame(width: width)
     }
 
-    // MARK: - Animated Track Navigations (Synchronized with Artwork Carousel)
+    // MARK: - Animated Track Navigations (Synchronized Horizontal Slide-and-Fade)
 
     private func animateToNextTrack(size: CGFloat) {
-        guard !model.isAnimatingTrackTransition, !model.isDraggingArtwork else { return }
-        guard let _ = player.getNextTrackInQueue() else {
+        guard !model.isTransitioningArtwork, !model.isDraggingArtwork else { return }
+        guard let next = player.getNextTrackInQueue() else {
             // Subtle edge rubber-band bounce when no next track exists
             MobileHaptics.trigger(.selection)
             withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
-                model.artworkDragOffset = -20
+                model.artworkDragOffset = -18
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
                 withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
                     model.artworkDragOffset = 0
                 }
@@ -871,24 +877,29 @@ public struct MobileNowPlayingSheet: View {
             return
         }
 
-        model.isAnimatingTrackTransition = true
         MobileHaptics.trigger(.medium)
-        player.slideDirection = .forward
+        model.transitionOutgoingTrack = player.currentTrack
+        model.transitionIncomingTrack = next
+        model.transitionDirection = .forward
+        model.transitionProgress = 0.0
+        model.isTransitioningArtwork = true
 
-        let stride = size + 20
-        withAnimation(FluidTheme.fluidSpring) {
-            model.artworkDragOffset = -stride
+        withAnimation(.easeInOut(duration: 0.26)) {
+            model.transitionProgress = 1.0
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.30) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.26) {
+            player.slideDirection = .forward
             player.forceNextTrack()
-            model.artworkDragOffset = 0
-            model.isAnimatingTrackTransition = false
+            model.isTransitioningArtwork = false
+            model.transitionOutgoingTrack = nil
+            model.transitionIncomingTrack = nil
+            model.transitionProgress = 0.0
         }
     }
 
     private func animateToPreviousTrack(size: CGFloat) {
-        guard !model.isAnimatingTrackTransition, !model.isDraggingArtwork else { return }
+        guard !model.isTransitioningArtwork, !model.isDraggingArtwork else { return }
 
         // Apple Music HIG: If more than 3 seconds into track, rewind to start
         if player.currentTime > 3.0 {
@@ -897,15 +908,13 @@ public struct MobileNowPlayingSheet: View {
             return
         }
 
-        guard let _ = player.getPreviousTrackInQueue() else {
+        guard let prev = player.getPreviousTrackInQueue() else {
             MobileHaptics.trigger(.selection)
-            if player.currentTime > 0 {
-                player.seek(to: 0)
-            }
+            if player.currentTime > 0 { player.seek(to: 0) }
             withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
-                model.artworkDragOffset = 20
+                model.artworkDragOffset = 18
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
                 withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
                     model.artworkDragOffset = 0
                 }
@@ -913,19 +922,24 @@ public struct MobileNowPlayingSheet: View {
             return
         }
 
-        model.isAnimatingTrackTransition = true
         MobileHaptics.trigger(.medium)
-        player.slideDirection = .backward
+        model.transitionOutgoingTrack = player.currentTrack
+        model.transitionIncomingTrack = prev
+        model.transitionDirection = .backward
+        model.transitionProgress = 0.0
+        model.isTransitioningArtwork = true
 
-        let stride = size + 20
-        withAnimation(FluidTheme.fluidSpring) {
-            model.artworkDragOffset = stride
+        withAnimation(.easeInOut(duration: 0.26)) {
+            model.transitionProgress = 1.0
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.30) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.26) {
+            player.slideDirection = .backward
             player.forcePreviousTrack()
-            model.artworkDragOffset = 0
-            model.isAnimatingTrackTransition = false
+            model.isTransitioningArtwork = false
+            model.transitionOutgoingTrack = nil
+            model.transitionIncomingTrack = nil
+            model.transitionProgress = 0.0
         }
     }
 
@@ -1340,7 +1354,7 @@ public struct MobileQueueSheet: View {
                         .padding(.vertical, 4)
                         .listRowBackground(
                             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(isLight ? Color.white : Color(uiColor: .secondarySystemGroupedBackground))
+                                .fill(isLight ? Color.white : Color.platformSecondarySystemBackground)
                         )
                     } header: {
                         Text("NOW PLAYING")
@@ -1368,7 +1382,7 @@ public struct MobileQueueSheet: View {
                         .padding(.vertical, 24)
                         .listRowBackground(
                             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(isLight ? Color.white : Color(uiColor: .secondarySystemGroupedBackground))
+                                .fill(isLight ? Color.white : Color.platformSecondarySystemBackground)
                         )
                     } else {
                         ForEach(upNextEntries) { entry in
@@ -1416,7 +1430,7 @@ public struct MobileQueueSheet: View {
                             .buttonStyle(PlainButtonStyle())
                             .listRowBackground(
                                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(isLight ? Color.white : Color(uiColor: .secondarySystemGroupedBackground))
+                                    .fill(isLight ? Color.white : Color.platformSecondarySystemBackground)
                             )
                         }
                         .onDelete { indexSet in
@@ -1467,7 +1481,7 @@ public struct MobileQueueSheet: View {
                     .tint(FluidTheme.musicRed)
                     .listRowBackground(
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(isLight ? Color.white : Color(uiColor: .secondarySystemGroupedBackground))
+                            .fill(isLight ? Color.white : Color.platformSecondarySystemBackground)
                     )
                 }
             }
@@ -1479,7 +1493,7 @@ public struct MobileQueueSheet: View {
             #endif
             .scrollContentBackground(.hidden)
             .background(
-                (isLight ? Color(uiColor: .systemGroupedBackground) : Color(uiColor: .systemBackground))
+                Color.platformSystemBackground
                     .ignoresSafeArea()
             )
             .navigationTitle("Playing Next")
@@ -1495,7 +1509,7 @@ public struct MobileQueueSheet: View {
         }
         .preferredColorScheme(themeManager.currentTheme.colorScheme)
         #if os(iOS)
-        .presentationBackground(isLight ? Color(uiColor: .systemGroupedBackground) : Color(uiColor: .systemBackground))
+        .presentationBackground(Color.platformSystemBackground)
         #endif
     }
 }

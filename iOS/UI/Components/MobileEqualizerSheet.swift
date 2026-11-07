@@ -55,9 +55,11 @@ public struct MobileEqualizerSheet: View {
                 .padding(.bottom, 32)
             }
             .navigationTitle("Equalizer")
+            #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
+            #endif
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .cancellationAction) {
                     Toggle(isOn: $player.isEqualizerEnabled) {
                         EmptyView()
                     }
@@ -68,7 +70,7 @@ public struct MobileEqualizerSheet: View {
                     }
                 }
                 
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
                         MobileHaptics.trigger(.light)
                         dismiss()
@@ -77,7 +79,7 @@ public struct MobileEqualizerSheet: View {
                     .tint(FluidTheme.musicRed)
                 }
             }
-            .background(isLight ? Color(UIColor.systemGroupedBackground) : FluidTheme.cardBackground)
+            .background(isLight ? Color.platformSystemBackground : FluidTheme.cardBackground)
         }
         .presentationDragIndicator(.visible)
         .presentationCornerRadius(28)
@@ -252,7 +254,7 @@ public struct MobileEqualizerSheet: View {
                 
                 // Fader Knob
                 Circle()
-                    .fill(isLight ? Color.white : Color(UIColor.systemGray5))
+                    .fill(isLight ? Color.white : Color.platformSecondarySystemBackground)
                     .frame(width: 22, height: 22)
                     .shadow(color: Color.black.opacity(0.2), radius: 3, y: 1)
                     .overlay(
