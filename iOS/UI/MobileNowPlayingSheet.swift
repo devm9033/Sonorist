@@ -1509,23 +1509,55 @@ public struct MobileQueueSheet: View {
                     }
                 }
 
-                // 3. Autoplay Radio Toggle
+                // 3. Autoplay Radio / Offline Autoplay Toggle
                 Section {
-                    Toggle(isOn: $player.isAutoplayEnabled) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Infinite Autoplay")
-                                .font(.system(size: 15, weight: .medium))
-                                .foregroundColor(isLight ? .primary : .white)
-                            Text("Similar songs keep playing when queue ends")
-                                .font(.system(size: 12))
-                                .foregroundColor(isLight ? .secondary : .white.opacity(0.65))
+                    if player.isPlayingFromOfflineLibrary {
+                        let cachedCount = player.cacheManager.getAllCachedTracks().count
+                        let hasMultipleDownloaded = cachedCount > 1
+                        Toggle(isOn: $player.isAutoplayEnabled) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 6) {
+                                    Text("Offline Autoplay")
+                                        .font(.system(size: 15, weight: .medium))
+                                        .foregroundColor(isLight ? .primary : .white)
+                                    Image(systemName: "arrow.down.circle.fill")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(hasMultipleDownloaded ? FluidTheme.musicRed : .secondary)
+                                }
+                                Text(hasMultipleDownloaded ? "Plays other downloaded songs when queue ends" : "No other downloaded songs to autoplay")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(isLight ? .secondary : .white.opacity(0.65))
+                            }
                         }
+                        .disabled(!hasMultipleDownloaded)
+                        .opacity(hasMultipleDownloaded ? 1.0 : 0.6)
+                        .tint(FluidTheme.musicRed)
+                        .listRowBackground(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(isLight ? Color.white : Color.platformSecondarySystemBackground)
+                        )
+                    } else {
+                        Toggle(isOn: $player.isAutoplayEnabled) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 6) {
+                                    Text("Infinite Autoplay")
+                                        .font(.system(size: 15, weight: .medium))
+                                        .foregroundColor(isLight ? .primary : .white)
+                                    Image(systemName: "infinity")
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundColor(FluidTheme.musicRed)
+                                }
+                                Text("Similar songs keep playing when queue ends")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(isLight ? .secondary : .white.opacity(0.65))
+                            }
+                        }
+                        .tint(FluidTheme.musicRed)
+                        .listRowBackground(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(isLight ? Color.white : Color.platformSecondarySystemBackground)
+                        )
                     }
-                    .tint(FluidTheme.musicRed)
-                    .listRowBackground(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(isLight ? Color.white : Color.platformSecondarySystemBackground)
-                    )
                 }
             }
             #if os(iOS)

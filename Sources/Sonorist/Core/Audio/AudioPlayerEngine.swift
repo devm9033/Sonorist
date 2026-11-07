@@ -125,7 +125,13 @@ public final class AudioPlayerEngine: ObservableObject {
     @Published public var queue: [Track] = []
     @Published public var isShuffle: Bool = false
     @Published public var repeatMode: RepeatMode = .off
-    @Published public var isAutoplayEnabled: Bool = true
+    @Published public var isAutoplayEnabled: Bool = true {
+        didSet {
+            if isAutoplayEnabled && isPlayingFromOfflineLibrary {
+                prefetchOfflineAutoplayIfNeeded()
+            }
+        }
+    }
     @Published public var isPlayingFromOfflineLibrary: Bool = false
     @Published public var errorMessage: String?
 
@@ -298,7 +304,7 @@ public final class AudioPlayerEngine: ObservableObject {
     private var pendingHandoffPlayer: AVPlayer?
     private var timeObserverPlayer: AVPlayer?
     private var timeObserverToken: Any?
-    private let cacheManager = MediaCacheManager.shared
+    public let cacheManager = MediaCacheManager.shared
     private var cancellables = Set<AnyCancellable>()
     private var playerItemCancellables = Set<AnyCancellable>()
     private var nowPlayingInfo: [String: Any] = [:]
@@ -1617,33 +1623,44 @@ public final class AudioPlayerEngine: ObservableObject {
         if currentIndex + 1 < queue.count {
             play(track: queue[currentIndex + 1])
 
-            // Prefetch next radio batch when near end of queue (Only when NOT playing offline library)
-            if !isPlayingFromOfflineLibrary && currentIndex + 2 >= queue.count && isAutoplayEnabled {
-                Task { @MainActor in
-                    if let last = self.queue.last {
-                        let more = try? await InnerTubeClient.shared.fetchRadioTracks(for: last.id)
-                        if let more = more {
-                            for t in more {
-                                if !self.queue.contains(where: { $0.id == t.id }) {
-                                    var trackToAdd = t
-                                    if let localArt = self.cacheManager.cachedArtworkURL(for: t.id) {
-                                        trackToAdd.artworkURL = localArt
+            // Prefetch next batch when near end of queue
+            if currentIndex + 2 >= queue.count && isAutoplayEnabled {
+                if !isPlayingFromOfflineLibrary {
+                    Task { @MainActor in
+                        if let last = self.queue.last {
+                            let more = try? await InnerTubeClient.shared.fetchRadioTracks(for: last.id)
+                            if let more = more {
+                                for t in more {
+                                    if !self.queue.contains(where: { $0.id == t.id }) {
+                                        var trackToAdd = t
+                                        if let localArt = self.cacheManager.cachedArtworkURL(for: t.id) {
+                                            trackToAdd.artworkURL = localArt
+                                        }
+                                        trackToAdd.isCached = self.cacheManager.isCached(videoId: t.id)
+                                        self.queue.append(trackToAdd)
                                     }
-                                    trackToAdd.isCached = self.cacheManager.isCached(videoId: t.id)
-                                    self.queue.append(trackToAdd)
                                 }
                             }
                         }
                     }
+                } else {
+                    self.prefetchOfflineAutoplayIfNeeded()
                 }
             }
         } else if repeatMode == .all {
             // Repeat all tracks: loop back to beginning of queue
             play(track: queue[0])
-        } else if !isPlayingFromOfflineLibrary && isAutoplayEnabled {
-            // Reached end of queue in Online mode: Autoplay next track from YouTube Music Radio
-            Task { @MainActor in
-                await self.startRadio(for: current)
+        } else if isAutoplayEnabled {
+            if isPlayingFromOfflineLibrary {
+                if !self.startOfflineAutoplay() {
+                    let nextIndex = (currentIndex + 1) % queue.count
+                    play(track: queue[nextIndex])
+                }
+            } else {
+                // Reached end of queue in Online mode: Autoplay next track from YouTube Music Radio
+                Task { @MainActor in
+                    await self.startRadio(for: current)
+                }
             }
         } else {
             // Repeat is OFF: On explicit next button tap, wrap around
@@ -1753,10 +1770,19 @@ public final class AudioPlayerEngine: ObservableObject {
             }
             if currentIndex + 1 < queue.count {
                 play(track: queue[currentIndex + 1])
-            } else if !isPlayingFromOfflineLibrary && isAutoplayEnabled {
-                // Autoplay YouTube Radio continuation
-                Task { @MainActor in
-                    await self.startRadio(for: current)
+            } else if isAutoplayEnabled {
+                if isPlayingFromOfflineLibrary {
+                    if !self.startOfflineAutoplay() {
+                        // Reached end of offline library with no other tracks to autoplay: Stop playback!
+                        player?.pause()
+                        isPlaying = false
+                        seek(to: 0)
+                    }
+                } else {
+                    // Autoplay YouTube Radio continuation
+                    Task { @MainActor in
+                        await self.startRadio(for: current)
+                    }
                 }
             } else {
                 // Reached end of offline library or queue with repeat OFF: Stop playback!
@@ -1796,6 +1822,10 @@ public final class AudioPlayerEngine: ObservableObject {
         }
 
         self.play(track: target)
+
+        if isAutoplayEnabled && self.queue.count <= 1 {
+            self.prefetchOfflineAutoplayIfNeeded()
+        }
     }
 
     /// Starts playback of a track from a general playlist (e.g. Liked songs, custom collections).
@@ -1908,6 +1938,65 @@ public final class AudioPlayerEngine: ObservableObject {
             #if DEBUG
             print("[Radio Autoplay Failed]: \(error)")
             #endif
+        }
+    }
+
+    /// Continues playback by shuffling and appending other downloaded tracks from the local offline library.
+    /// Returns true if an offline track was successfully queued and played; false if no other downloaded tracks exist.
+    @discardableResult
+    public func startOfflineAutoplay() -> Bool {
+        guard isPlayingFromOfflineLibrary && isAutoplayEnabled else { return false }
+        let allCached = cacheManager.getAllCachedTracks()
+        guard !allCached.isEmpty else { return false }
+
+        // 1. First priority: Downloaded tracks that are not yet in the active queue
+        var candidates = allCached.filter { cached in
+            !queue.contains(where: { $0.id == cached.id })
+        }
+
+        // 2. Second priority: If all downloaded tracks were already queued, recycle downloaded tracks excluding current
+        if candidates.isEmpty {
+            candidates = allCached.filter { $0.id != currentTrack?.id }
+        }
+
+        guard !candidates.isEmpty else { return false }
+
+        candidates.shuffle()
+
+        // Append candidate tracks to the queue so the user can inspect them in "Playing Next"
+        for t in candidates {
+            var trackToAdd = t
+            trackToAdd.isCached = true
+            if let localArt = self.cacheManager.cachedArtworkURL(for: t.id) {
+                trackToAdd.artworkURL = localArt
+            }
+            self.queue.append(trackToAdd)
+        }
+
+        if let first = candidates.first {
+            play(track: first)
+            return true
+        }
+
+        return false
+    }
+
+    /// Pre-populates the offline queue with remaining downloaded tracks when near the end of the queue
+    public func prefetchOfflineAutoplayIfNeeded() {
+        guard isPlayingFromOfflineLibrary && isAutoplayEnabled else { return }
+        let allCached = cacheManager.getAllCachedTracks()
+        let unqueued = allCached.filter { cached in
+            !queue.contains(where: { $0.id == cached.id })
+        }
+        guard !unqueued.isEmpty else { return }
+        let toAdd = Array(unqueued.shuffled().prefix(10))
+        for t in toAdd {
+            var trackToAdd = t
+            trackToAdd.isCached = true
+            if let localArt = self.cacheManager.cachedArtworkURL(for: t.id) {
+                trackToAdd.artworkURL = localArt
+            }
+            self.queue.append(trackToAdd)
         }
     }
 

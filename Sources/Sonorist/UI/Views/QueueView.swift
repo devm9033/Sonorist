@@ -38,7 +38,10 @@ public struct QueueView: View {
                 
                 Spacer()
                 
-                // Autoplay Radio Toggle Pill
+                // Autoplay Radio / Offline Autoplay Toggle Pill
+                let isOffline = player.isPlayingFromOfflineLibrary
+                let cachedCount = player.cacheManager.getAllCachedTracks().count
+                let canAutoplay = !isOffline || cachedCount > 1
                 Button(action: {
                     FluidHaptics.tap()
                     withAnimation(FluidTheme.tapSpring) {
@@ -46,9 +49,9 @@ public struct QueueView: View {
                     }
                 }) {
                     HStack(spacing: 5) {
-                        Image(systemName: "infinity")
+                        Image(systemName: isOffline ? "arrow.down.circle.fill" : "infinity")
                             .font(.system(size: 10, weight: .bold))
-                        Text(player.isAutoplayEnabled ? "Autoplay On" : "Autoplay Off")
+                        Text(player.isAutoplayEnabled ? (isOffline ? "Offline Autoplay On" : "Autoplay On") : "Autoplay Off")
                             .font(.system(size: 11, weight: .semibold, design: .rounded))
                     }
                     .padding(.horizontal, 10)
@@ -58,7 +61,9 @@ public struct QueueView: View {
                     .clipShape(Capsule())
                 }
                 .buttonStyle(PlainButtonStyle())
-                .help("When queue finishes, automatically play similar radio songs")
+                .disabled(!canAutoplay)
+                .opacity(canAutoplay ? 1.0 : 0.6)
+                .help(isOffline ? (canAutoplay ? "When queue finishes, automatically play other downloaded songs" : "No other downloaded songs to autoplay") : "When queue finishes, automatically play similar radio songs")
                 
                 if !player.queue.isEmpty {
                     Button("Clear All") {

@@ -1093,6 +1093,38 @@ struct SonoristTestsRunner {
             }
         }
         
+        test("Offline Autoplay: Seamless Continuation from Downloaded Media Without Network") {
+            let engine = AudioPlayerEngine.shared
+            let trackA = Track(id: "cached_test_auto_a", title: "Offline Song A", artist: "Artist", durationSeconds: 120)
+            let trackB = Track(id: "cached_test_auto_b", title: "Offline Song B", artist: "Artist", durationSeconds: 150)
+            
+            // Register both tracks in cacheManager
+            let dummyData = Data(repeating: 0x41, count: 512)
+            try engine.cacheManager.cacheTrack(track: trackA, data: dummyData)
+            try engine.cacheManager.cacheTrack(track: trackB, data: dummyData)
+            
+            engine.isPlayingFromOfflineLibrary = true
+            engine.isAutoplayEnabled = true
+            engine.queue = [trackA]
+            engine.currentTrack = trackA
+            
+            // Trigger offline autoplay continuation
+            let didAutoplay = engine.startOfflineAutoplay()
+            guard didAutoplay else {
+                throw TestError("Expected startOfflineAutoplay to find and queue downloaded track B")
+            }
+            guard engine.queue.contains(where: { $0.id == trackB.id }) else {
+                throw TestError("Expected track B to be appended to queue")
+            }
+            guard engine.currentTrack?.id == trackB.id else {
+                throw TestError("Expected current track to transition to track B")
+            }
+            
+            // Clean up cached dummy tracks
+            engine.cacheManager.removeCachedTrack(videoId: trackA.id)
+            engine.cacheManager.removeCachedTrack(videoId: trackB.id)
+        }
+        
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         print("  Results: \(passed) passed, \(failed) failed")
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
