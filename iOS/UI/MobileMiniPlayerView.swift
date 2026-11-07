@@ -6,6 +6,7 @@ import SwiftUI
 public struct MobileMiniPlayerView: View {
     @ObservedObject private var player = AudioPlayerEngine.shared
     @ObservedObject private var progressTracker = PlaybackProgressTracker.shared
+    @ObservedObject private var coordinator = MobileNavigationCoordinator.shared
     public let screenHeight: CGFloat
     public let onTap: () -> Void
     
@@ -16,6 +17,9 @@ public struct MobileMiniPlayerView: View {
     
     public var body: some View {
         if let track = player.currentTrack {
+            let offset = coordinator.miniPlayerDownwardOffset
+            let dismissProgress = min(1.0, max(0.0, offset / 60.0))
+            
             VStack(spacing: 0) {
                 // Top Micro-Progress Bar
                 GeometryReader { geo in
@@ -100,29 +104,43 @@ public struct MobileMiniPlayerView: View {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .stroke(Color.primary.opacity(0.12), lineWidth: 0.5)
             )
-            .shadow(color: .black.opacity(0.18), radius: 10, x: 0, y: 4)
+            .shadow(color: .black.opacity(0.18 * Double(1.0 - dismissProgress)), radius: 10, x: 0, y: 4)
             .padding(.horizontal, 12)
             .padding(.bottom, 6)
+            .offset(y: offset)
+            .opacity(1.0 - Double(dismissProgress * 0.95))
+            .scaleEffect(1.0 - (dismissProgress * 0.05))
             .contentShape(Rectangle())
-            // 1:1 Interactive Slide-Up Drag Gesture — Glues the full Now Playing sheet to the finger
+            // 1:1 Interactive Slide-Up Drag Gesture & Downward Flick Dismissal
             .gesture(
                 DragGesture(minimumDistance: 8)
                     .onChanged { value in
                         if value.translation.height < 0 {
-                            let coordinator = MobileNavigationCoordinator.shared
+                            // Upward gesture: direct manipulation expanding full sheet
+                            coordinator.miniPlayerDownwardOffset = 0
                             if !coordinator.isDraggingUpFromMiniPlayer {
                                 coordinator.isDraggingUpFromMiniPlayer = true
                                 MobileHaptics.trigger(.light)
                             }
-                            // The full Now Playing sheet slides smoothly upward from screen bottom
-                            let offset = max(0, screenHeight + value.translation.height)
-                            coordinator.sheetDragOffset = offset
+                            let sheetOffset = max(0, screenHeight + value.translation.height)
+                            coordinator.sheetDragOffset = sheetOffset
+                        } else if value.translation.height > 0 {
+                            // Downward gesture
+                            if coordinator.isDraggingUpFromMiniPlayer {
+                                coordinator.isDraggingUpFromMiniPlayer = false
+                            }
+                            if !player.isPlaying {
+                                // 1:1 Direct Manipulation tracking downward when idle/paused
+                                coordinator.miniPlayerDownwardOffset = value.translation.height
+                            } else {
+                                // Rubber-band boundary cushioning when music is playing
+                                coordinator.miniPlayerDownwardOffset = sqrt(value.translation.height) * 2.8
+                            }
                         }
                     }
                     .onEnded { value in
-                        let coordinator = MobileNavigationCoordinator.shared
                         if coordinator.isDraggingUpFromMiniPlayer {
-                            // Fling upward or dragged past threshold
+                            // Upward sheet expansion
                             if value.translation.height < -65 || value.predictedEndTranslation.height < -140 {
                                 MobileHaptics.trigger(.medium)
                                 withAnimation(FluidTheme.fluidSpring) {
@@ -133,7 +151,6 @@ public struct MobileMiniPlayerView: View {
                                     coordinator.isDraggingUpFromMiniPlayer = false
                                 }
                             } else {
-                                // Cancel and spring smoothly back off-screen
                                 withAnimation(FluidTheme.fluidSpring) {
                                     coordinator.sheetDragOffset = screenHeight
                                 }
@@ -142,11 +159,43 @@ public struct MobileMiniPlayerView: View {
                                     coordinator.isNowPlayingExpanded = false
                                 }
                             }
+                        } else if coordinator.miniPlayerDownwardOffset > 0 {
+                            let curOffset = coordinator.miniPlayerDownwardOffset
+                            // Downward flick handling
+                            if !player.isPlaying && (curOffset > 30 || value.predictedEndTranslation.height > 60) {
+                                // User flicked down to dismiss while paused
+                                MobileHaptics.trigger(.light)
+                                withAnimation(FluidTheme.fluidSpring) {
+                                    coordinator.miniPlayerDownwardOffset = 80
+                                    coordinator.isMiniPlayerDismissed = true
+                                }
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                                    coordinator.miniPlayerDownwardOffset = 0
+                                }
+                            } else if player.isPlaying && (curOffset > 50 || value.predictedEndTranslation.height > 200) {
+                                // Forceful downward flick while playing -> pause and dismiss
+                                MobileHaptics.trigger(.medium)
+                                player.pause()
+                                withAnimation(FluidTheme.fluidSpring) {
+                                    coordinator.miniPlayerDownwardOffset = 80
+                                    coordinator.isMiniPlayerDismissed = true
+                                }
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                                    coordinator.miniPlayerDownwardOffset = 0
+                                }
+                            } else {
+                                // Spring back to rest position
+                                withAnimation(FluidTheme.fluidSpring) {
+                                    coordinator.miniPlayerDownwardOffset = 0
+                                }
+                            }
                         }
                     }
             )
-            // Tap gesture as instant fallback
+            // Tap gesture as instant fallback (ignored during active drag)
             .onTapGesture {
+                guard coordinator.miniPlayerDownwardOffset == 0 else { return }
+                guard !coordinator.isDraggingUpFromMiniPlayer else { return }
                 MobileHaptics.trigger(.medium)
                 onTap()
             }

@@ -80,6 +80,7 @@ public struct MobileLibraryView: View {
                         MobileHaptics.trigger(.medium)
                         let tracks = currentTracks
                         if let first = tracks.shuffled().first {
+                            MobileNavigationCoordinator.shared.revealMiniPlayer()
                             player.playFromOfflineLibrary(tracks: tracks.shuffled(), selectedTrack: first)
                         }
                     } label: {
@@ -223,6 +224,7 @@ public struct MobileLibraryView: View {
             // Main clickable playback area
             Button {
                 MobileHaptics.trigger(.medium)
+                MobileNavigationCoordinator.shared.revealMiniPlayer()
                 player.playFromOfflineLibrary(tracks: currentTracks, selectedTrack: track)
             } label: {
                 HStack(spacing: 12) {

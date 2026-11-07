@@ -4,11 +4,25 @@ public final class MobileNavigationCoordinator: ObservableObject {
     public static let shared = MobileNavigationCoordinator()
     
     @Published public var selectedTab: MobileTab = .search
-    @Published public var isNowPlayingExpanded: Bool = true
+    @Published public var isNowPlayingExpanded: Bool = false
+    @Published public var isMiniPlayerDismissed: Bool = true
+    @Published public var miniPlayerDownwardOffset: CGFloat = 0
     @Published public var sheetDragOffset: CGFloat = 0
     @Published public var isDraggingUpFromMiniPlayer: Bool = false
     
     public init() {}
+
+    public func revealMiniPlayer() {
+        withAnimation(FluidTheme.fluidSpring) {
+            isMiniPlayerDismissed = false
+        }
+    }
+
+    public func dismissMiniPlayer() {
+        withAnimation(FluidTheme.fluidSpring) {
+            isMiniPlayerDismissed = true
+        }
+    }
 }
 
 /// Main Root Coordinator for Sonorist on iOS / iPhone
@@ -16,6 +30,7 @@ public final class MobileNavigationCoordinator: ObservableObject {
 /// Supports fluid 1:1 interactive sheet expansion gesture from the mini player dock.
 public struct MobileRootView: View {
     @ObservedObject private var coordinator = MobileNavigationCoordinator.shared
+    @ObservedObject private var player = AudioPlayerEngine.shared
     
     public init() {}
     
@@ -39,15 +54,23 @@ public struct MobileRootView: View {
                 
                 // Floating Chrome: MiniPlayer + TabBar
                 VStack(spacing: 0) {
-                    MobileMiniPlayerView(screenHeight: screenHeight) {
-                        withAnimation(FluidTheme.fluidSpring) {
-                            coordinator.sheetDragOffset = 0
-                            coordinator.isNowPlayingExpanded = true
+                    if !coordinator.isMiniPlayerDismissed && player.currentTrack != nil {
+                        MobileMiniPlayerView(screenHeight: screenHeight) {
+                            withAnimation(FluidTheme.fluidSpring) {
+                                coordinator.sheetDragOffset = 0
+                                coordinator.isNowPlayingExpanded = true
+                            }
                         }
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .bottom).combined(with: .opacity),
+                            removal: .move(edge: .bottom).combined(with: .opacity)
+                        ))
                     }
                     
                     MobileTabBarView(selectedTab: $coordinator.selectedTab)
                 }
+                .animation(FluidTheme.fluidSpring, value: coordinator.isMiniPlayerDismissed)
+                .animation(FluidTheme.fluidSpring, value: player.currentTrack != nil)
                 
                 // Native In-App Slide-up Modal Sheet for Now Playing
                 // Supports both animated presentation and 1:1 direct manipulation finger tracking
@@ -75,6 +98,16 @@ public struct MobileRootView: View {
         }
         .onAppear {
             iOSAudioSessionManager.shared.configurePlaybackSession()
+        }
+        .onChange(of: player.isPlaying) { _, isPlaying in
+            if isPlaying {
+                coordinator.revealMiniPlayer()
+            }
+        }
+        .onChange(of: player.currentTrack?.id) { _, newId in
+            if newId != nil && (player.isPlaying || player.isBuffering) {
+                coordinator.revealMiniPlayer()
+            }
         }
         .onChange(of: coordinator.isNowPlayingExpanded) { _, expanded in
             if expanded {

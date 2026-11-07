@@ -302,6 +302,7 @@ public struct MobileSearchView: View {
     private func listenAgainCard(for track: Track) -> some View {
         Button {
             MobileHaptics.trigger(.medium)
+            MobileNavigationCoordinator.shared.revealMiniPlayer()
             player.playWithRadioAutoplay(track: track)
         } label: {
             VStack(alignment: .leading, spacing: 6) {
@@ -398,6 +399,7 @@ public struct MobileSearchView: View {
             Button {
                 dismissKeyboard()
                 MobileHaptics.trigger(.medium)
+                MobileNavigationCoordinator.shared.revealMiniPlayer()
                 if !model.searchResults.isEmpty && model.searchResults.contains(where: { $0.id == track.id }) {
                     player.playFromSearch(results: model.searchResults, selectedTrack: track)
                 } else if !model.recommendedTracks.isEmpty && model.recommendedTracks.contains(where: { $0.id == track.id }) {
