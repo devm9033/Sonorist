@@ -81,7 +81,11 @@ public struct MobileLibraryView: View {
                         let tracks = currentTracks
                         if let first = tracks.shuffled().first {
                             MobileNavigationCoordinator.shared.revealMiniPlayer()
-                            player.playFromOfflineLibrary(tracks: tracks.shuffled(), selectedTrack: first)
+                            if model.selectedSegment == .downloaded {
+                                player.playFromOfflineLibrary(tracks: tracks.shuffled(), selectedTrack: first)
+                            } else {
+                                player.playFromPlaylist(tracks: tracks.shuffled(), selectedTrack: first)
+                            }
                         }
                     } label: {
                         HStack(spacing: 4) {
@@ -157,7 +161,7 @@ public struct MobileLibraryView: View {
                     .padding(.top, 80)
                 } else {
                     List {
-                        ForEach(Array(tracks.enumerated()), id: \.offset) { _, track in
+                        ForEach(tracks, id: \.id) { track in
                             libraryTrackRow(for: track)
                                 .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                                 .listRowSeparator(.hidden)
@@ -225,7 +229,11 @@ public struct MobileLibraryView: View {
             Button {
                 MobileHaptics.trigger(.medium)
                 MobileNavigationCoordinator.shared.revealMiniPlayer()
-                player.playFromOfflineLibrary(tracks: currentTracks, selectedTrack: track)
+                if model.selectedSegment == .downloaded {
+                    player.playFromOfflineLibrary(tracks: currentTracks, selectedTrack: track)
+                } else {
+                    player.playFromPlaylist(tracks: currentTracks, selectedTrack: track)
+                }
             } label: {
                 HStack(spacing: 12) {
                     TrackArtworkView(
@@ -296,7 +304,11 @@ public struct MobileLibraryView: View {
             // Isolated ellipsis menu (prevents conflicting gesture recognition)
             Menu {
                 Button {
-                    player.playFromOfflineLibrary(tracks: currentTracks, selectedTrack: track)
+                    if model.selectedSegment == .downloaded {
+                        player.playFromOfflineLibrary(tracks: currentTracks, selectedTrack: track)
+                    } else {
+                        player.playFromPlaylist(tracks: currentTracks, selectedTrack: track)
+                    }
                 } label: {
                     Label("Play Now", systemImage: "play.circle")
                 }

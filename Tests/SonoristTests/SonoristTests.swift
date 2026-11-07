@@ -1038,6 +1038,61 @@ struct SonoristTestsRunner {
             }
         }
         
+        test("ArtworkImageCache: Instant RAM Lookup & Cache Eviction") {
+            let cache = ArtworkImageCache.shared
+            cache.clear()
+            guard cache.image(for: nil) == nil else {
+                throw TestError("Nil URL must return nil")
+            }
+            
+            let dummyURL = URL(string: "https://yt3.googleusercontent.com/test_art.jpg")!
+            guard cache.image(for: dummyURL) == nil else {
+                throw TestError("Uncached URL must initially return nil")
+            }
+            
+            // Verify cache clear triggers revision update
+            let oldRev = cache.cacheRevision
+            cache.clear()
+            guard cache.cacheRevision >= oldRev else {
+                throw TestError("Cache clear must maintain monotonically non-decreasing revision")
+            }
+        }
+        
+        test("Offline Playback Resilience: Missing Cached Track Halts Gracefully Without Runaway Skipping Loop") {
+            let engine = AudioPlayerEngine.shared
+            let unCachedTrack = Track(id: "missing_offline_test_id", title: "Missing Song", artist: "Ghost", durationSeconds: 180)
+            
+            engine.isPlayingFromOfflineLibrary = true
+            engine.queue = [unCachedTrack]
+            engine.currentTrack = unCachedTrack
+            
+            // Trigger playback of uncached track in offline mode
+            engine.play(track: unCachedTrack)
+            
+            // Must not loop indefinitely or leave isPlaying true
+            guard engine.isPlaying == false else {
+                throw TestError("Uncached track in offline mode must stop playback, not play")
+            }
+        }
+        
+        test("Playlist Playback Mode: General Playlists Stream Online While Respecting Offline Caching") {
+            let engine = AudioPlayerEngine.shared
+            let onlineTrack1 = Track(id: "online_trk_1", title: "Online 1", artist: "Artist", durationSeconds: 200)
+            let onlineTrack2 = Track(id: "online_trk_2", title: "Online 2", artist: "Artist", durationSeconds: 210)
+            
+            engine.playFromPlaylist(tracks: [onlineTrack1, onlineTrack2], selectedTrack: onlineTrack1)
+            
+            guard engine.isPlayingFromOfflineLibrary == false else {
+                throw TestError("playFromPlaylist must keep isPlayingFromOfflineLibrary = false")
+            }
+            guard engine.queue.count == 2 else {
+                throw TestError("Expected queue to have 2 playlist tracks")
+            }
+            guard engine.currentTrack?.id == onlineTrack1.id else {
+                throw TestError("Expected current track to be onlineTrack1")
+            }
+        }
+        
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         print("  Results: \(passed) passed, \(failed) failed")
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")

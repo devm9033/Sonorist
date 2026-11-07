@@ -74,12 +74,14 @@ public final class AppThemeManager: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            guard let self = self else { return }
-            if let saved = UserDefaults.standard.string(forKey: AppThemeManager.themeDefaultsKey),
-               let mode = AppThemeMode(rawValue: saved),
-               mode != self.currentTheme {
-                withAnimation(FluidTheme.fluidSpring) {
-                    self.currentTheme = mode
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                if let saved = UserDefaults.standard.string(forKey: AppThemeManager.themeDefaultsKey),
+                   let mode = AppThemeMode(rawValue: saved),
+                   mode != self.currentTheme {
+                    withAnimation(FluidTheme.fluidSpring) {
+                        self.currentTheme = mode
+                    }
                 }
             }
         }

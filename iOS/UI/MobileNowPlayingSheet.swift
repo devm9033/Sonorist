@@ -187,6 +187,12 @@ public struct MobileNowPlayingSheet: View {
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(28)
         }
+        .onAppear {
+            player.preloadNextTrack()
+        }
+        .onChange(of: player.currentTrack?.id) { _, _ in
+            player.preloadNextTrack()
+        }
     }
 
     // MARK: - Ambient Backdrop

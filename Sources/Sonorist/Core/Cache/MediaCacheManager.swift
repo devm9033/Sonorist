@@ -1,6 +1,11 @@
 import Foundation
-#if os(macOS)
+import Combine
+#if canImport(UIKit)
+import UIKit
+public typealias PlatformImage = UIImage
+#elseif canImport(AppKit)
 import AppKit
+public typealias PlatformImage = NSImage
 #endif
 import AVFoundation
 import CoreMedia
@@ -47,7 +52,7 @@ public final class MediaCacheManager: @unchecked Sendable {
         self.exportsDirectory = baseDir.appendingPathComponent("Exports", isDirectory: true)
         self.historyDirectory = baseDir.appendingPathComponent("History", isDirectory: true)
         self.artworkDirectory = baseDir.appendingPathComponent("ArtworkCache", isDirectory: true)
-        self.playbackTempDirectory = URL(fileURLWithPath: "/tmp/SonoristPlayback", isDirectory: true)
+        self.playbackTempDirectory = baseDir.appendingPathComponent("PlaybackTemp", isDirectory: true)
         self.manifestURL = libraryDirectory.appendingPathComponent("library_manifest.json")
         
         setupDirectories()
@@ -126,13 +131,18 @@ public final class MediaCacheManager: @unchecked Sendable {
     /// Checks if a track is available offline (instant zero-IO lookup with disk fallback)
     public func isCached(videoId: String) -> Bool {
         return queue.sync {
-            if cachedIdsSet.contains(videoId) { return true }
-            let candidate = "\(videoId).sonorist"
-            if fileManager.fileExists(atPath: libraryDirectory.appendingPathComponent(candidate).path) {
-                cachedManifest[videoId] = candidate
+            let safeId = videoId.filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
+            let lookupId = safeId.isEmpty ? videoId : safeId
+            let filename = cachedManifest[lookupId] ?? cachedManifest[videoId] ?? "\(lookupId).sonorist"
+            let candidate = libraryDirectory.appendingPathComponent(filename)
+            if fileManager.fileExists(atPath: candidate.path) {
+                cachedManifest[lookupId] = filename
+                cachedIdsSet.insert(lookupId)
                 cachedIdsSet.insert(videoId)
                 return true
             }
+            cachedIdsSet.remove(lookupId)
+            cachedIdsSet.remove(videoId)
             return false
         }
     }
@@ -184,12 +194,15 @@ public final class MediaCacheManager: @unchecked Sendable {
     /// Prepares real-time in-memory playback for a .sonorist bundle
     public func preparePlaybackStream(for videoId: String) -> URL? {
         return queue.sync {
-            let filename = cachedManifest[videoId] ?? "\(videoId).sonorist"
+            let safeId = videoId.filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
+            let lookupId = safeId.isEmpty ? videoId : safeId
+            let filename = cachedManifest[lookupId] ?? cachedManifest[videoId] ?? "\(lookupId).sonorist"
             let bundleURL = libraryDirectory.appendingPathComponent(filename)
             guard fileManager.fileExists(atPath: bundleURL.path) else { return nil }
             
-            if cachedManifest[videoId] == nil {
-                cachedManifest[videoId] = filename
+            if cachedManifest[lookupId] == nil {
+                cachedManifest[lookupId] = filename
+                cachedIdsSet.insert(lookupId)
                 cachedIdsSet.insert(videoId)
             }
             
@@ -197,7 +210,7 @@ public final class MediaCacheManager: @unchecked Sendable {
             try? fileManager.createDirectory(at: playbackTempDirectory, withIntermediateDirectories: true)
             
             // Check if already extracted in temp directory
-            let tempPlayURL = playbackTempDirectory.appendingPathComponent("\(videoId).m4a")
+            let tempPlayURL = playbackTempDirectory.appendingPathComponent("\(lookupId).m4a")
             if fileManager.fileExists(atPath: tempPlayURL.path),
                let attr = try? fileManager.attributesOfItem(atPath: tempPlayURL.path),
                let size = attr[.size] as? Int64, size > 1024 {
@@ -675,4 +688,138 @@ public final class MediaCacheManager: @unchecked Sendable {
         NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: parentDirectory.path)
     }
     #endif
+}
+
+// MARK: - In-Memory Hardware-Accelerated Artwork Image Cache
+
+/// Thread-safe in-memory cache for track artwork images.
+/// Pre-warms incoming and adjacent track covers to eliminate render lag,
+/// blank placeholder flickering, and main-thread disk decode stalls during transitions.
+public final class ArtworkImageCache: ObservableObject, @unchecked Sendable {
+    public static let shared = ArtworkImageCache()
+    @Published public var cacheRevision: Int = 0
+    
+    private let cache = NSCache<NSURL, PlatformImage>()
+    private let session: URLSession
+    private let syncQueue = DispatchQueue(label: "com.sonorist.artcache.queue")
+    private var inFlightTasks: [URL: Task<PlatformImage?, Never>] = [:]
+    
+    private init() {
+        cache.countLimit = 60
+        cache.totalCostLimit = 50 * 1024 * 1024 // 50 MB
+        
+        let config = URLSessionConfiguration.default
+        config.requestCachePolicy = .returnCacheDataElseLoad
+        config.urlCache = URLCache(memoryCapacity: 20 * 1024 * 1024, diskCapacity: 100 * 1024 * 1024)
+        self.session = URLSession(configuration: config)
+        
+        #if canImport(UIKit)
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.clear()
+        }
+        #endif
+    }
+    
+    public func clear() {
+        cache.removeAllObjects()
+        DispatchQueue.main.async {
+            self.cacheRevision &+= 1
+        }
+    }
+    
+    /// Instant O(1) synchronous RAM lookup. Returns decoded PlatformImage if already in memory.
+    public func image(for url: URL?) -> PlatformImage? {
+        guard let url = url else { return nil }
+        return cache.object(forKey: url as NSURL)
+    }
+    
+    /// Pre-warms artwork in background so it's instantly available when swiping or switching tracks.
+    public func preload(url: URL?) {
+        guard let url = url else { return }
+        if cache.object(forKey: url as NSURL) != nil { return }
+        
+        Task.detached(priority: .utility) { [weak self] in
+            _ = await self?.loadImage(for: url)
+        }
+    }
+    
+    /// Asynchronously loads, decodes, and caches artwork from disk or network off the main thread.
+    public func loadImage(for url: URL?) async -> PlatformImage? {
+        guard let url = url else { return nil }
+        if let cached = cache.object(forKey: url as NSURL) {
+            return cached
+        }
+        
+        // Coalesce concurrent duplicate requests
+        var existingTask: Task<PlatformImage?, Never>?
+        syncQueue.sync {
+            existingTask = inFlightTasks[url]
+        }
+        if let existing = existingTask {
+            return await existing.value
+        }
+        
+        let newTask = Task<PlatformImage?, Never>.detached(priority: .userInitiated) { [weak self, session, url] () -> PlatformImage? in
+            defer {
+                self?.syncQueue.async {
+                    self?.inFlightTasks.removeValue(forKey: url)
+                }
+            }
+            
+            // 1. Local disk file
+            if url.isFileURL {
+                #if canImport(UIKit)
+                guard let image = UIImage(contentsOfFile: url.path) else { return nil }
+                UIGraphicsBeginImageContextWithOptions(image.size, false, image.scale)
+                image.draw(at: .zero)
+                let decoded = UIGraphicsGetImageFromCurrentImageContext() ?? image
+                UIGraphicsEndImageContext()
+                self?.cache.setObject(decoded, forKey: url as NSURL)
+                DispatchQueue.main.async { self?.cacheRevision &+= 1 }
+                return decoded
+                #elseif canImport(AppKit)
+                guard let image = NSImage(contentsOfFile: url.path) else { return nil }
+                self?.cache.setObject(image, forKey: url as NSURL)
+                DispatchQueue.main.async { self?.cacheRevision &+= 1 }
+                return image
+                #endif
+            }
+            
+            // 2. Remote network URL
+            do {
+                var req = URLRequest(url: url)
+                req.timeoutInterval = 8
+                let (data, response) = try await session.data(for: req)
+                guard (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+                
+                #if canImport(UIKit)
+                guard let image = UIImage(data: data) else { return nil }
+                UIGraphicsBeginImageContextWithOptions(image.size, false, image.scale)
+                image.draw(at: .zero)
+                let decoded = UIGraphicsGetImageFromCurrentImageContext() ?? image
+                UIGraphicsEndImageContext()
+                self?.cache.setObject(decoded, forKey: url as NSURL)
+                DispatchQueue.main.async { self?.cacheRevision &+= 1 }
+                return decoded
+                #elseif canImport(AppKit)
+                guard let image = NSImage(data: data) else { return nil }
+                self?.cache.setObject(image, forKey: url as NSURL)
+                DispatchQueue.main.async { self?.cacheRevision &+= 1 }
+                return image
+                #endif
+            } catch {
+                return nil
+            }
+        }
+        
+        syncQueue.sync {
+            inFlightTasks[url] = newTask
+        }
+        
+        return await newTask.value
+    }
 }

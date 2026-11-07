@@ -484,7 +484,11 @@ public struct LibraryView: View {
                             viewModel.showDeleteTrackAlert = true
                         },
                         onPlay: {
-                            player.playFromOfflineLibrary(tracks: tracks, selectedTrack: track)
+                            if viewModel.selectedTab == .cached {
+                                player.playFromOfflineLibrary(tracks: tracks, selectedTrack: track)
+                            } else {
+                                player.playFromPlaylist(tracks: tracks, selectedTrack: track)
+                            }
                         }
                     )
                 }

@@ -158,6 +158,7 @@ extension Color {
 // MARK: - Offline-First Track Artwork View
 
 public struct TrackArtworkView: View {
+    @ObservedObject private var cache = ArtworkImageCache.shared
     let url: URL?
     let contentMode: ContentMode
     let cornerRadius: CGFloat
@@ -181,59 +182,28 @@ public struct TrackArtworkView: View {
             let h = geo.size.height
             let side = max(1, min(w, h))
             let isLetterbox = url?.absoluteString.contains("hqdefault.jpg") == true || url?.absoluteString.contains("mqdefault.jpg") == true
+            let memImage = cache.image(for: url)
             
             ZStack {
                 placeholder(side: side)
                 
                 #if os(iOS)
-                if let url = url, url.isFileURL, let uiImage = UIImage(contentsOfFile: url.path) {
+                if let uiImage = memImage {
                     Image(uiImage: uiImage)
                         .resizable()
                         .aspectRatio(contentMode: contentMode)
                         .scaleEffect(isLetterbox ? 1.35 : 1.0)
                         .frame(width: side, height: side)
                         .clipped()
-                } else if let url = url, SecurityAudit.validateURL(url.absoluteString) != nil {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: contentMode)
-                                .scaleEffect(isLetterbox ? 1.35 : 1.0)
-                                .frame(width: side, height: side)
-                                .clipped()
-                        default:
-                            EmptyView()
-                        }
-                    }
-                    .frame(width: side, height: side)
-                    .clipped()
                 }
                 #else
-                if let url = url, url.isFileURL, let nsImage = NSImage(contentsOfFile: url.path) {
+                if let nsImage = memImage {
                     Image(nsImage: nsImage)
                         .resizable()
                         .aspectRatio(contentMode: contentMode)
                         .scaleEffect(isLetterbox ? 1.35 : 1.0)
                         .frame(width: side, height: side)
                         .clipped()
-                } else if let url = url, SecurityAudit.validateURL(url.absoluteString) != nil {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: contentMode)
-                                .scaleEffect(isLetterbox ? 1.35 : 1.0)
-                                .frame(width: side, height: side)
-                                .clipped()
-                        default:
-                            EmptyView()
-                        }
-                    }
-                    .frame(width: side, height: side)
-                    .clipped()
                 }
                 #endif
             }
@@ -241,6 +211,11 @@ public struct TrackArtworkView: View {
             .clipped()
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .position(x: w / 2, y: h / 2)
+            .task(id: url) {
+                if memImage == nil, let url = url {
+                    _ = await cache.loadImage(for: url)
+                }
+            }
         }
         .aspectRatio(1.0, contentMode: .fit)
     }
