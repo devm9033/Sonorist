@@ -361,12 +361,11 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
         }
 
         let preferences = [
+            "gemini-3.8-flash",
+            "gemini-3.5-flash",
+            "gemini-3.0-flash",
             "gemini-2.5-flash",
-            "gemini-2.0-flash",
-            "gemini-2.0-flash-exp",
-            "gemini-1.5-flash",
-            "gemini-1.5-flash-8b",
-            "gemini-1.5-pro"
+            "gemini-2.0-flash"
         ]
 
         for pref in preferences {
@@ -587,15 +586,25 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
             }
 
             // Auto-fallback and retry for Gemini if model not found or deprecated
-            if provider == .gemini && retryCount < 2 && (errDetail.contains("not found") || errDetail.contains("not supported") || (response as? HTTPURLResponse)?.statusCode == 404) {
+            if provider == .gemini && retryCount < 3 && (errDetail.contains("no longer available") || errDetail.contains("not found") || errDetail.contains("not supported") || (response as? HTTPURLResponse)?.statusCode == 404) {
+                // If Google explicitly suggests a model (e.g. "use models/gemini-3.8-flash")
+                if let regex = try? NSRegularExpression(pattern: "models/([a-zA-Z0-9.-]+)"),
+                   let match = regex.matches(in: errDetail, range: NSRange(errDetail.startIndex..., in: errDetail)).last,
+                   let range = Range(match.range(at: 1), in: errDetail) {
+                    let recommended = String(errDetail[range])
+                    if recommended != currentModel {
+                        config.activeGeminiModel = recommended
+                        return try await executeLLMRequest(prompt: prompt, retryCount: retryCount + 1)
+                    }
+                }
+
+                if currentModel != "gemini-3.8-flash" {
+                    config.activeGeminiModel = "gemini-3.8-flash"
+                    return try await executeLLMRequest(prompt: prompt, retryCount: retryCount + 1)
+                }
+
                 if let discovered = await discoverGeminiModel(apiKey: apiKey), discovered != currentModel {
                     config.activeGeminiModel = discovered
-                    return try await executeLLMRequest(prompt: prompt, retryCount: retryCount + 1)
-                } else if currentModel != "gemini-2.0-flash" {
-                    config.activeGeminiModel = "gemini-2.0-flash"
-                    return try await executeLLMRequest(prompt: prompt, retryCount: retryCount + 1)
-                } else if currentModel != "gemini-2.5-flash" {
-                    config.activeGeminiModel = "gemini-2.5-flash"
                     return try await executeLLMRequest(prompt: prompt, retryCount: retryCount + 1)
                 }
             }

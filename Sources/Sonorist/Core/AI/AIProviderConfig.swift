@@ -19,7 +19,7 @@ public enum AIProvider: String, Codable, CaseIterable, Identifiable, Sendable {
 
     public var defaultModel: String {
         switch self {
-        case .gemini: return "gemini-2.0-flash"
+        case .gemini: return "gemini-3.8-flash"
         case .groq: return "llama-3.3-70b-versatile"
         case .openai: return "gpt-4o-mini"
         case .ollama: return "llama3"
@@ -102,7 +102,12 @@ public final class AIProviderConfig: ObservableObject, @unchecked Sendable {
         self.isAutoCurateOnDownloadEnabled = defaults.object(forKey: keyAutoDownload) as? Bool ?? true
         self.isAutoRetryPendingEnabled = defaults.object(forKey: keyAutoRetryPending) as? Bool ?? true
         self.customEndpoint = defaults.string(forKey: keyCustomEndpoint) ?? ""
-        self.activeGeminiModel = defaults.string(forKey: keyGeminiModel) ?? "gemini-2.0-flash"
+        let savedModel = defaults.string(forKey: keyGeminiModel) ?? "gemini-3.8-flash"
+        if savedModel.contains("1.5") || savedModel.contains("2.0") || savedModel.contains("2.5") {
+            self.activeGeminiModel = "gemini-3.8-flash"
+        } else {
+            self.activeGeminiModel = savedModel
+        }
 
         if let time = defaults.object(forKey: keyLastSync) as? Double {
             self.lastSyncDate = Date(timeIntervalSince1970: time)
