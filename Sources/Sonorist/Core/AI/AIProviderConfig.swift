@@ -19,7 +19,7 @@ public enum AIProvider: String, Codable, CaseIterable, Identifiable, Sendable {
 
     public var defaultModel: String {
         switch self {
-        case .gemini: return "gemini-1.5-flash"
+        case .gemini: return "gemini-2.0-flash"
         case .groq: return "llama-3.3-70b-versatile"
         case .openai: return "gpt-4o-mini"
         case .ollama: return "llama3"
@@ -55,6 +55,7 @@ public final class AIProviderConfig: ObservableObject, @unchecked Sendable {
     private let keyAutoRetryPending = "Sonorist_AIAutoRetryPending"
     private let keyLastSync = "Sonorist_AILastSync"
     private let keyCustomEndpoint = "Sonorist_AICustomEndpoint"
+    private let keyGeminiModel = "Sonorist_AIGeminiModel"
 
     @Published public var selectedProvider: AIProvider {
         didSet { defaults.set(selectedProvider.rawValue, forKey: keyProvider) }
@@ -81,6 +82,10 @@ public final class AIProviderConfig: ObservableObject, @unchecked Sendable {
         didSet { defaults.set(customEndpoint, forKey: keyCustomEndpoint) }
     }
 
+    @Published public var activeGeminiModel: String {
+        didSet { defaults.set(activeGeminiModel, forKey: keyGeminiModel) }
+    }
+
     @Published public var lastSyncDate: Date? {
         didSet { defaults.set(lastSyncDate?.timeIntervalSince1970, forKey: keyLastSync) }
     }
@@ -97,6 +102,7 @@ public final class AIProviderConfig: ObservableObject, @unchecked Sendable {
         self.isAutoCurateOnDownloadEnabled = defaults.object(forKey: keyAutoDownload) as? Bool ?? true
         self.isAutoRetryPendingEnabled = defaults.object(forKey: keyAutoRetryPending) as? Bool ?? true
         self.customEndpoint = defaults.string(forKey: keyCustomEndpoint) ?? ""
+        self.activeGeminiModel = defaults.string(forKey: keyGeminiModel) ?? "gemini-2.0-flash"
 
         if let time = defaults.object(forKey: keyLastSync) as? Double {
             self.lastSyncDate = Date(timeIntervalSince1970: time)

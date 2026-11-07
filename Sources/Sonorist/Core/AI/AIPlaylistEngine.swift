@@ -337,6 +337,50 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
 
     // MARK: - API Key Connection Verification
 
+    /// Discovers active supported Gemini model for the user's API key
+    public func discoverGeminiModel(apiKey: String) async -> String? {
+        guard let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models?key=\(apiKey)") else {
+            return nil
+        }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 10.0
+        guard let (data, response) = try? await URLSession.shared.data(for: req),
+              let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let models = json["models"] as? [[String: Any]] else {
+            return nil
+        }
+
+        let validModels = models.compactMap { m -> String? in
+            guard let name = m["name"] as? String,
+                  let methods = m["supportedGenerationMethods"] as? [String],
+                  methods.contains("generateContent") else {
+                return nil
+            }
+            return name.replacingOccurrences(of: "models/", with: "")
+        }
+
+        let preferences = [
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-exp",
+            "gemini-1.5-flash",
+            "gemini-1.5-flash-8b",
+            "gemini-1.5-pro"
+        ]
+
+        for pref in preferences {
+            if validModels.contains(pref) {
+                return pref
+            }
+        }
+
+        if let anyFlash = validModels.first(where: { $0.contains("flash") }) {
+            return anyFlash
+        }
+        return validModels.first
+    }
+
     /// Tests the connection to the configured AI API with a quick ping.
     /// Returns a user-friendly status message and sets connectionMessage.
     @MainActor
@@ -352,11 +396,19 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
         defer { self.testingConnection = false }
 
         let provider = config.selectedProvider
+        let apiKey = config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if provider == .gemini {
+            if let discovered = await discoverGeminiModel(apiKey: apiKey) {
+                config.activeGeminiModel = discovered
+            }
+        }
 
         do {
             let testPrompt = "Respond strictly with valid JSON: {\"status\": \"ok\"}"
             _ = try await executeLLMRequest(prompt: testPrompt)
-            let successMsg = "✓ Connection Verified! \(provider.displayName) is active and working."
+            let currentModel = (provider == .gemini) ? config.activeGeminiModel : provider.defaultModel
+            let successMsg = "✓ Connection Verified! \(provider.displayName) (\(currentModel)) is ready."
             self.connectionMessage = successMsg
             self.lastSyncError = nil
 
@@ -472,15 +524,16 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
         return AICuratedLibrary(lastUpdated: Date(), categories: wrapper.categories)
     }
 
-    private func executeLLMRequest(prompt: String) async throws -> String {
+    private func executeLLMRequest(prompt: String, retryCount: Int = 0) async throws -> String {
         let provider = config.selectedProvider
         let apiKey = config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
 
         var request: URLRequest
+        let currentModel = (provider == .gemini) ? config.activeGeminiModel : provider.defaultModel
 
         switch provider {
         case .gemini:
-            guard let url = URL(string: "\(provider.defaultEndpoint)/\(provider.defaultModel):generateContent?key=\(apiKey)") else {
+            guard let url = URL(string: "\(provider.defaultEndpoint)/\(currentModel):generateContent?key=\(apiKey)") else {
                 throw URLError(.badURL)
             }
             request = URLRequest(url: url)
@@ -532,6 +585,21 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
             } else if let str = String(data: data, encoding: .utf8), !str.isEmpty {
                 errDetail = str
             }
+
+            // Auto-fallback and retry for Gemini if model not found or deprecated
+            if provider == .gemini && retryCount < 2 && (errDetail.contains("not found") || errDetail.contains("not supported") || (response as? HTTPURLResponse)?.statusCode == 404) {
+                if let discovered = await discoverGeminiModel(apiKey: apiKey), discovered != currentModel {
+                    config.activeGeminiModel = discovered
+                    return try await executeLLMRequest(prompt: prompt, retryCount: retryCount + 1)
+                } else if currentModel != "gemini-2.0-flash" {
+                    config.activeGeminiModel = "gemini-2.0-flash"
+                    return try await executeLLMRequest(prompt: prompt, retryCount: retryCount + 1)
+                } else if currentModel != "gemini-2.5-flash" {
+                    config.activeGeminiModel = "gemini-2.5-flash"
+                    return try await executeLLMRequest(prompt: prompt, retryCount: retryCount + 1)
+                }
+            }
+
             throw NSError(domain: "AIPlaylistEngine", code: (response as? HTTPURLResponse)?.statusCode ?? 500, userInfo: [NSLocalizedDescriptionKey: errDetail])
         }
 
