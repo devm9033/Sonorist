@@ -295,12 +295,21 @@ public final class AudioPlayerEngine: ObservableObject {
     }
     
     private var player: AVPlayer?
+    private var timeObserverPlayer: AVPlayer?
     private var timeObserverToken: Any?
     private let cacheManager = MediaCacheManager.shared
     private var cancellables = Set<AnyCancellable>()
     private var playerItemCancellables = Set<AnyCancellable>()
     private var nowPlayingInfo: [String: Any] = [:]
     private var isRemoteCommandsConfigured: Bool = false
+    
+    private func removeCurrentTimeObserver() {
+        if let token = timeObserverToken, let observingPlayer = timeObserverPlayer {
+            observingPlayer.removeTimeObserver(token)
+        }
+        timeObserverToken = nil
+        timeObserverPlayer = nil
+    }
     
     // Intentional Listening Gate State
     public var continuousListeningSeconds: Double = 0.0
@@ -346,8 +355,8 @@ public final class AudioPlayerEngine: ObservableObject {
     }
     
     deinit {
-        if let token = timeObserverToken {
-            player?.removeTimeObserver(token)
+        if let token = timeObserverToken, let observingPlayer = timeObserverPlayer {
+            observingPlayer.removeTimeObserver(token)
         }
     }
     
@@ -539,6 +548,20 @@ public final class AudioPlayerEngine: ObservableObject {
                 self.slideDirection = (newIdx >= curIdx) ? .forward : .backward
             }
         }
+        
+        // Gracefully fade out outgoing player if playing to avoid abrupt clicks/pops
+        if let oldPlayer = self.player, self.isPlaying {
+            let curVol = oldPlayer.volume
+            Task { @MainActor in
+                let steps = 4
+                for s in 1...steps {
+                    try? await Task.sleep(nanoseconds: 20_000_000)
+                    oldPlayer.volume = max(0, curVol * Float(steps - s) / Float(steps))
+                }
+                oldPlayer.pause()
+            }
+        }
+        
         self.currentTrack = track
         self.isBuffering = true
         self.errorMessage = nil
@@ -1034,10 +1057,7 @@ public final class AudioPlayerEngine: ObservableObject {
     
     private func startPlayer(with url: URL, track: Track, autoPlay: Bool = true, seekTo: Double? = nil) {
         cancelCrossfade()
-        if let token = timeObserverToken {
-            player?.removeTimeObserver(token)
-            timeObserverToken = nil
-        }
+        removeCurrentTimeObserver()
         playerItemCancellables.removeAll()
         stallRecoveryTask?.cancel()
         
@@ -1075,11 +1095,7 @@ public final class AudioPlayerEngine: ObservableObject {
     }
     
     private func setupPlayerObservers(for newPlayer: AVPlayer, playerItem: AVPlayerItem, track: Track, autoPlay: Bool = true, seekTo: Double? = nil, isCrossfadeIncoming: Bool = false) {
-        if let token = timeObserverToken {
-            player?.removeTimeObserver(token)
-            outgoingPlayer?.removeTimeObserver(token)
-            timeObserverToken = nil
-        }
+        removeCurrentTimeObserver()
         playerItemCancellables.removeAll()
         
         // 1. Observe status & initial ready-to-play
@@ -1232,6 +1248,7 @@ public final class AudioPlayerEngine: ObservableObject {
             .store(in: &playerItemCancellables)
         
         // Periodic time observer for smooth UI scrubbing & lyric line synchronization (250ms interval)
+        removeCurrentTimeObserver()
         let interval = CMTime(seconds: 0.25, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
         timeObserverToken = newPlayer.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             guard let self = self else { return }
@@ -1301,6 +1318,7 @@ public final class AudioPlayerEngine: ObservableObject {
                 }
             }
         }
+        timeObserverPlayer = newPlayer
         
         // Track completion
         NotificationCenter.default.publisher(for: AVPlayerItem.didPlayToEndTimeNotification, object: playerItem)
@@ -1430,13 +1448,9 @@ public final class AudioPlayerEngine: ObservableObject {
     
     public func next() {
         FluidHaptics.toggle()
-        if isCrossfadeEnabled && crossfadeDuration > 0, let next = getNextTrackInQueue(), currentTrack != nil {
-            crossfadeTo(track: next, direction: .forward)
-        } else {
-            cancelCrossfade()
-            slideDirection = .forward
-            nextTrack()
-        }
+        cancelCrossfade()
+        slideDirection = .forward
+        nextTrack()
     }
     
     /// Immediate forceful track advance (used when user manually flicks album art)
@@ -1512,22 +1526,14 @@ public final class AudioPlayerEngine: ObservableObject {
         
         if currentIndex > 0 {
             let prev = queue[currentIndex - 1]
-            if isCrossfadeEnabled && crossfadeDuration > 0 {
-                crossfadeTo(track: prev, direction: .backward)
-            } else {
-                cancelCrossfade()
-                slideDirection = .backward
-                play(track: prev)
-            }
+            cancelCrossfade()
+            slideDirection = .backward
+            play(track: prev)
         } else if repeatMode == .all && queue.count > 1 {
             let prev = queue[queue.count - 1]
-            if isCrossfadeEnabled && crossfadeDuration > 0 {
-                crossfadeTo(track: prev, direction: .backward)
-            } else {
-                cancelCrossfade()
-                slideDirection = .backward
-                play(track: prev)
-            }
+            cancelCrossfade()
+            slideDirection = .backward
+            play(track: prev)
         } else {
             // At start of queue: rewind to beginning of track (standard Apple Music behavior)
             cancelCrossfade()

@@ -182,62 +182,8 @@ public struct MobileNowPlayingSheet: View {
     // MARK: - Ambient Backdrop
     
     private var ambientBackground: some View {
-        ZStack {
-            Color.platformSystemBackground
-            
-            if let track = player.currentTrack {
-                #if os(iOS)
-                if let url = track.artworkURL, url.isFileURL, let uiImage = UIImage(contentsOfFile: url.path) {
-                    Image(uiImage: uiImage)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .saturation(colorScheme == .light ? 1.35 : 1.0)
-                        .blur(radius: colorScheme == .light ? 50 : 60)
-                        .opacity(colorScheme == .light ? 0.55 : 0.48)
-                } else {
-                    AsyncImage(url: track.artworkURL) { phase in
-                        if let image = phase.image {
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                                .saturation(colorScheme == .light ? 1.35 : 1.0)
-                                .blur(radius: colorScheme == .light ? 50 : 60)
-                                .opacity(colorScheme == .light ? 0.55 : 0.48)
-                        }
-                    }
-                }
-                #else
-                if let url = track.artworkURL, url.isFileURL, let nsImage = NSImage(contentsOfFile: url.path) {
-                    Image(nsImage: nsImage)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .saturation(colorScheme == .light ? 1.35 : 1.0)
-                        .blur(radius: colorScheme == .light ? 50 : 60)
-                        .opacity(colorScheme == .light ? 0.55 : 0.48)
-                } else {
-                    AsyncImage(url: track.artworkURL) { phase in
-                        if let image = phase.image {
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                                .saturation(colorScheme == .light ? 1.35 : 1.0)
-                                .blur(radius: colorScheme == .light ? 50 : 60)
-                                .opacity(colorScheme == .light ? 0.55 : 0.48)
-                        }
-                    }
-                }
-                #endif
-            }
-            
-            if colorScheme == .light {
-                Color.platformSystemBackground
-                    .opacity(0.68)
-            } else {
-                Rectangle()
-                    .fill(.ultraThinMaterial)
-                    .opacity(0.85)
-            }
-        }
+        AmbientArtworkBackdrop(artworkURL: player.currentTrack?.artworkURL, colorScheme: colorScheme)
+            .equatable()
     }
     
     // MARK: - Top Grabber Handle & Header
@@ -621,15 +567,14 @@ public struct MobileNowPlayingSheet: View {
                     
                     guard model.isDraggingArtwork else { return }
                     
-                    // Progressive physical rubber-banding resistance at boundaries (Apple HIG formula: (x * d * c) / (d + c * abs(x)))
-                    let constant: CGFloat = 0.55
+                    // Progressive physical rubber-banding resistance at boundaries (Apple HIG: very gentle reaction, max ~20pt)
                     if dx > 0 && prevTrack == nil {
                         let absDx = abs(dx)
-                        let rubberBanded = (absDx * size * constant) / (size + constant * absDx)
+                        let rubberBanded = min(20.0, pow(absDx, 0.6) * 1.1)
                         model.artworkDragOffset = rubberBanded
                     } else if dx < 0 && nextTrack == nil {
                         let absDx = abs(dx)
-                        let rubberBanded = (absDx * size * constant) / (size + constant * absDx)
+                        let rubberBanded = min(20.0, pow(absDx, 0.6) * 1.1)
                         model.artworkDragOffset = -rubberBanded
                     } else {
                         model.artworkDragOffset = dx
@@ -640,44 +585,67 @@ public struct MobileNowPlayingSheet: View {
                     
                     let dx = model.artworkDragOffset
                     let predicted = value.predictedEndTranslation.width
-                    let threshold: CGFloat = 50
+                    let threshold: CGFloat = 55
                     
-                    if dx < -threshold || predicted < -120 {
-                        // Manual Flick Left -> Forcefully play Next Track immediately
-                        if let _ = nextTrack {
-                            MobileHaptics.trigger(.medium)
-                            model.isDraggingArtwork = false
-                            model.artworkDragOffset = 0
-                            player.forceNextTrack()
-                        } else {
-                            MobileHaptics.trigger(.selection)
-                            withAnimation(FluidTheme.fluidSpring) {
-                                model.artworkDragOffset = 0
-                                model.isDraggingArtwork = false
-                            }
+                    // 1. Boundary on first track: pulling right when no previous track exists
+                    if dx > 0 && prevTrack == nil {
+                        MobileHaptics.trigger(.selection)
+                        if player.currentTime > 0 {
+                            player.seek(to: 0)
                         }
-                    } else if dx > threshold || predicted > 120 {
-                        // Manual Flick Right -> Forcefully play Previous Track immediately
-                        if let _ = prevTrack {
-                            MobileHaptics.trigger(.medium)
-                            model.isDraggingArtwork = false
+                        withAnimation(.spring(response: 0.55, dampingFraction: 0.88, blendDuration: 0.1)) {
                             model.artworkDragOffset = 0
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            model.isDraggingArtwork = false
+                        }
+                        return
+                    }
+                    
+                    // 2. Boundary on last track: pulling left when no next track exists
+                    if dx < 0 && nextTrack == nil {
+                        MobileHaptics.trigger(.selection)
+                        withAnimation(.spring(response: 0.55, dampingFraction: 0.88, blendDuration: 0.1)) {
+                            model.artworkDragOffset = 0
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            model.isDraggingArtwork = false
+                        }
+                        return
+                    }
+                    
+                    // 3. Flick Left -> Smoothly continue sliding out to left, slide next track into center
+                    if (dx < -threshold || predicted < -120), let next = nextTrack {
+                        MobileHaptics.trigger(.medium)
+                        let targetOffset = -size - 24
+                        withAnimation(FluidTheme.fluidSpring) {
+                            model.artworkDragOffset = targetOffset
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
+                            player.slideDirection = .forward
+                            player.forceNextTrack()
+                            model.artworkDragOffset = 0
+                            model.isDraggingArtwork = false
+                        }
+                    } else if (dx > threshold || predicted > 120), let prev = prevTrack {
+                        // 4. Flick Right -> Smoothly continue sliding out to right, slide previous track into center
+                        MobileHaptics.trigger(.medium)
+                        let targetOffset = size + 24
+                        withAnimation(FluidTheme.fluidSpring) {
+                            model.artworkDragOffset = targetOffset
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
+                            player.slideDirection = .backward
                             player.forcePreviousTrack()
-                        } else {
-                            // At head of queue: spring snap-back & seek to 0:00 if track was playing
-                            MobileHaptics.trigger(.selection)
-                            if player.currentTime > 0 {
-                                player.seek(to: 0)
-                            }
-                            withAnimation(FluidTheme.fluidSpring) {
-                                model.artworkDragOffset = 0
-                                model.isDraggingArtwork = false
-                            }
+                            model.artworkDragOffset = 0
+                            model.isDraggingArtwork = false
                         }
                     } else {
-                        // Incomplete swipe -> fluid spring snap-back to center
+                        // 5. Incomplete gesture -> smoothly return current card to center
                         withAnimation(FluidTheme.fluidSpring) {
                             model.artworkDragOffset = 0
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
                             model.isDraggingArtwork = false
                         }
                     }
@@ -1442,5 +1410,75 @@ public struct MobileQueueSheet: View {
         #if os(iOS)
         .presentationBackground(isLight ? Color(uiColor: .systemGroupedBackground) : Color(uiColor: .systemBackground))
         #endif
+    }
+}
+
+// MARK: - Equatable Ambient Artwork Backdrop (Prevents Re-Rendering Heavy 60px Blur)
+
+public struct AmbientArtworkBackdrop: View, Equatable {
+    let artworkURL: URL?
+    let colorScheme: ColorScheme
+    
+    public static func == (lhs: AmbientArtworkBackdrop, rhs: AmbientArtworkBackdrop) -> Bool {
+        lhs.artworkURL == rhs.artworkURL && lhs.colorScheme == rhs.colorScheme
+    }
+    
+    public var body: some View {
+        ZStack {
+            Color.platformSystemBackground
+            
+            if let url = artworkURL {
+                #if os(iOS)
+                if url.isFileURL, let uiImage = UIImage(contentsOfFile: url.path) {
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .saturation(colorScheme == .light ? 1.35 : 1.0)
+                        .blur(radius: colorScheme == .light ? 50 : 60)
+                        .opacity(colorScheme == .light ? 0.55 : 0.48)
+                } else {
+                    AsyncImage(url: url) { phase in
+                        if let image = phase.image {
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .saturation(colorScheme == .light ? 1.35 : 1.0)
+                                .blur(radius: colorScheme == .light ? 50 : 60)
+                                .opacity(colorScheme == .light ? 0.55 : 0.48)
+                        }
+                    }
+                }
+                #else
+                if url.isFileURL, let nsImage = NSImage(contentsOfFile: url.path) {
+                    Image(nsImage: nsImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .saturation(colorScheme == .light ? 1.35 : 1.0)
+                        .blur(radius: colorScheme == .light ? 50 : 60)
+                        .opacity(colorScheme == .light ? 0.55 : 0.48)
+                } else {
+                    AsyncImage(url: url) { phase in
+                        if let image = phase.image {
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .saturation(colorScheme == .light ? 1.35 : 1.0)
+                                .blur(radius: colorScheme == .light ? 50 : 60)
+                                .opacity(colorScheme == .light ? 0.55 : 0.48)
+                        }
+                    }
+                }
+                #endif
+            }
+            
+            if colorScheme == .light {
+                Color.platformSystemBackground
+                    .opacity(0.68)
+            } else {
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .opacity(0.85)
+            }
+        }
     }
 }
