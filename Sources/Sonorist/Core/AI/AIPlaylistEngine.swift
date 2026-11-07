@@ -305,6 +305,53 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
         }
     }
 
+    // MARK: - API Key Connection Verification
+
+    /// Tests the connection to the configured AI API with a quick ping.
+    /// Returns a user-friendly status message and sets connectionMessage.
+    @MainActor
+    public func testAPIConnection() async -> (success: Bool, message: String) {
+        guard config.isConfigured else {
+            let msg = "Please enter an API key first."
+            self.connectionMessage = msg
+            return (false, msg)
+        }
+
+        self.testingConnection = true
+        self.connectionMessage = nil
+        defer { self.testingConnection = false }
+
+        let provider = config.selectedProvider
+
+        do {
+            let testPrompt = "Respond strictly with valid JSON: {\"status\": \"ok\"}"
+            _ = try await executeLLMRequest(prompt: testPrompt)
+            let successMsg = "✓ Connection Verified! \(provider.displayName) is active and working."
+            self.connectionMessage = successMsg
+            self.lastSyncError = nil
+
+            // If there were pending tracks waiting in the outbox, process them automatically!
+            Task {
+                await self.processPendingQueueIfNeeded()
+            }
+            return (true, successMsg)
+        } catch {
+            let nsErr = error as NSError
+            let detail = nsErr.localizedDescription
+            let errMsg: String
+            if nsErr.code == 400 || nsErr.code == 401 || nsErr.code == 403 {
+                errMsg = "✗ Authentication Failed (\(nsErr.code)): \(detail)"
+            } else if (error as? URLError)?.code == .notConnectedToInternet {
+                errMsg = "✗ Network Offline: Could not reach \(provider.displayName). Check your internet connection."
+            } else {
+                errMsg = "✗ Connection Failed: \(detail)"
+            }
+            self.connectionMessage = errMsg
+            self.lastSyncError = errMsg
+            return (false, errMsg)
+        }
+    }
+
     /// Backward compatibility alias
     public func performDailySyncIfNeeded() async {
         await processPendingQueueIfNeeded()
@@ -447,8 +494,15 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            let errStr = String(data: data, encoding: .utf8) ?? "HTTP Error"
-            throw NSError(domain: "AIPlaylistEngine", code: (response as? HTTPURLResponse)?.statusCode ?? 500, userInfo: [NSLocalizedDescriptionKey: errStr])
+            var errDetail = "HTTP \((response as? HTTPURLResponse)?.statusCode ?? 500)"
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let errorObj = json["error"] as? [String: Any],
+               let message = errorObj["message"] as? String {
+                errDetail = message
+            } else if let str = String(data: data, encoding: .utf8), !str.isEmpty {
+                errDetail = str
+            }
+            throw NSError(domain: "AIPlaylistEngine", code: (response as? HTTPURLResponse)?.statusCode ?? 500, userInfo: [NSLocalizedDescriptionKey: errDetail])
         }
 
         // Parse LLM provider response structure
@@ -517,15 +571,54 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
         var language = "English"
         var langIcon = "globe"
 
-        let hindiKeywords = ["kumar sanu", "udit narayan", "lata", "asha", "arijit", "shreya", "sonu nigam", "rahat", "kishore", "rafi", "atif", "t series", "bollywood", "dil", "pyar", "tera", "meri", "hum", "tum", "ishq"]
-        let punjabiKeywords = ["diljit", "sidhu", "ap dhillon", "karan aujla", "shubh", "amrinder", "gurdas", "bhangra", "jatt", "punjabi"]
-        let instrumentalKeywords = ["lo-fi", "lofi", "instrumental", "piano", "acoustic", "orchestral", "ost", "theme", "ambient"]
+        let hindiKeywords = [
+            "arijit", "shreya", "atif", "sonu nigam", "sunidhi", "kumar sanu", "udit narayan", "lata", "asha", 
+            "kishore", "rafi", "mukesh", "jagjit", "pritam", "badshah", "neha kakkar", "jubin", "armaan malik",
+            "darshan raval", "vishal", "shekhar", "sachin-jigar", "shankar mahadevan", "amit trivedi", "anuv jain",
+            "prateek kuhad", "b praak", "t-series", "t series", "bollywood", "filmi", "dil", "pyar", "ishq", "mohabbat",
+            "meri", "tera", "tum", "hum", "suno", "jaan", "sanam", "zindagi", "raat", "aankhen", "saath", "channa",
+            "chaleya", "kesariya", "apna bana le", "deva deva", "kabira", "kalank", "shayad", "raataan lambiyan",
+            "tujhe", "humsafar", "phir", "kabhi", "jeena", "dua karo", "khairiyat"
+        ]
 
-        if instrumentalKeywords.contains(where: { combined.contains($0) }) {
+        let englishArtists = [
+            "dua lipa", "taylor swift", "ed sheeran", "the weeknd", "weeknd", "drake", "eminem", 
+            "billie eilish", "ariana grande", "justin bieber", "post malone", "bruno mars", 
+            "coldplay", "imagine dragons", "queen", "beatles", "michael jackson", "rihanna",
+            "shakira", "adele", "maroon 5", "charlie puth", "shawn mendes", "olivia rodrigo",
+            "kendrick lamar", "travis scott", "kanye", "beyonce", "lady gaga", "katy perry"
+        ]
+
+        let punjabiKeywords = [
+            "diljit", "sidhu", "karan aujla", "ap dhillon", "shubh", "guru randhawa", "amrinder", "gurdas", 
+            "babbu maan", "jassi gill", "harrdy sandhu", "parmish", "ammy virk", "honey singh", "bohemia",
+            "imran khan", "mickey singh", "prophec", "bhangra", "jatt", "gabru", "punjabi", "pind", "gaddi",
+            "patola", "high rated", "prada", "goat", "chorni", "same beef", "elevated", "no love", "drip too hard",
+            "softly", "brown munde", "insane", "cheques", "one love", "tauba tauba"
+        ]
+
+        let southIndianKeywords = [
+            "anirudh", "sid sriram", "ilaiyaraaja", "devi sri prasad", "dsp", "gv prakash", "spb", "balasubrahmanyam",
+            "chithra", "thaman", "harris jayaraj", "yuvan", "santhosh narayanan", "tamil", "telugu", "malayalam", "kannada",
+            "arabic kuthu", "naatu naatu", "butta bomma", "samajavaragamana", "rowdy baby", "kaavaalaa", "hukum"
+        ]
+
+        let instrumentalKeywords = [
+            "lo-fi", "lofi", "instrumental", "piano", "acoustic guitar", "orchestral", "ost", "theme", 
+            "ambient", "synthwave", "sleep", "meditation", "relaxing", "interstellar", "hans zimmer"
+        ]
+
+        if englishArtists.contains(where: { combined.contains($0) }) {
+            language = "English"
+            langIcon = "globe"
+        } else if instrumentalKeywords.contains(where: { combined.contains($0) }) {
             language = "Instrumental"
             langIcon = "guitars"
         } else if punjabiKeywords.contains(where: { combined.contains($0) }) {
             language = "Punjabi"
+            langIcon = "music.mic"
+        } else if southIndianKeywords.contains(where: { combined.contains($0) }) {
+            language = "South Indian"
             langIcon = "music.mic"
         } else if hindiKeywords.contains(where: { combined.contains($0) }) || containsDevanagari(combined) {
             language = "Hindi"
@@ -537,19 +630,24 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
         var genreIcon = "heart.fill"
         var genreDesc = "Soulful melodies and romantic tracks"
 
-        if combined.contains("dance") || combined.contains("remix") || combined.contains("party") || combined.contains("club") || combined.contains("pop") || combined.contains("levitating") {
+        let danceKeywords = ["dance", "remix", "party", "club", "pop", "disco", "beat", "upbeat", "levitating", "badshah", "honey singh", "edm", "house", "dj"]
+        let acousticKeywords = ["acoustic", "unplugged", "chill", "night", "slow", "soft", "lofi", "lo-fi", "coffee", "sleep", "rain", "anuv jain", "prateek kuhad"]
+        let classicKeywords = ["199", "198", "197", "196", "classic", "old", "retro", "vintage", "kishore", "lata", "rafi", "mukesh", "asha", "jagjit", "ghazal", "heritage", "golden era"]
+        let energeticKeywords = ["rap", "hip hop", "drill", "trap", "hype", "bass", "gym", "workout", "phonk", "diss", "sidhu", "karan aujla", "emiway", "raftaar", "divine", "stan", "eminem", "drake"]
+
+        if danceKeywords.contains(where: { combined.contains($0) }) {
             genre = "Pop & Dance"
             genreIcon = "flame.fill"
             genreDesc = "High-energy chart-toppers and dance beats"
-        } else if combined.contains("acoustic") || combined.contains("unplugged") || combined.contains("chill") || combined.contains("night") || combined.contains("slow") {
+        } else if acousticKeywords.contains(where: { combined.contains($0) }) {
             genre = "Acoustic & Chill"
             genreIcon = "moon.stars.fill"
             genreDesc = "Gentle acoustic, lo-fi, and midnight vibes"
-        } else if combined.contains("199") || combined.contains("classic") || combined.contains("old") || combined.contains("retro") || combined.contains("kishore") || combined.contains("lata") || combined.contains("sanu") {
+        } else if classicKeywords.contains(where: { combined.contains($0) }) {
             genre = "Classics & Heritage"
             genreIcon = "sparkles"
             genreDesc = "Timeless classics and golden era favorites"
-        } else if combined.contains("rap") || combined.contains("hip hop") || combined.contains("drill") || combined.contains("trap") || combined.contains("hype") {
+        } else if energeticKeywords.contains(where: { combined.contains($0) }) {
             genre = "Energetic & Beats"
             genreIcon = "bolt.fill"
             genreDesc = "Bass-heavy rap, beats, and motivational energy"

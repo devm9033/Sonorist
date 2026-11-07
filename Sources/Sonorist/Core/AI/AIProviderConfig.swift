@@ -19,7 +19,7 @@ public enum AIProvider: String, Codable, CaseIterable, Identifiable, Sendable {
 
     public var defaultModel: String {
         switch self {
-        case .gemini: return "gemini-2.0-flash"
+        case .gemini: return "gemini-1.5-flash"
         case .groq: return "llama-3.3-70b-versatile"
         case .openai: return "gpt-4o-mini"
         case .ollama: return "llama3"

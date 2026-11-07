@@ -581,12 +581,65 @@ public struct AISettingsSheet: View {
                         SecureField("API Key", text: $config.apiKey)
                             .font(.system(size: 14, design: .monospaced))
 
-                        Link("Get a Free \(config.selectedProvider.displayName) Key ↗", destination: URL(string: config.selectedProvider.instructionsURL)!)
-                            .font(.system(size: 12, weight: .medium))
+                        HStack {
+                            Link("Get Free \(config.selectedProvider.displayName) Key ↗", destination: URL(string: config.selectedProvider.instructionsURL)!)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(FluidTheme.musicRed)
+                            Spacer()
+                        }
+
+                        // Dedicated Test API Key Button
+                        Button {
+                            MobileHaptics.trigger(.medium)
+                            Task {
+                                _ = await engine.testAPIConnection()
+                            }
+                        } label: {
+                            HStack(spacing: 8) {
+                                if engine.testingConnection {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                } else {
+                                    Image(systemName: "checkmark.shield.fill")
+                                }
+                                Text(engine.testingConnection ? "Verifying with \(config.selectedProvider.displayName)..." : "Test API Key & Verify Connection")
+                                    .font(.system(size: 13, weight: .semibold))
+                            }
                             .foregroundColor(FluidTheme.musicRed)
+                        }
+                        .disabled(engine.testingConnection || config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                        if let msg = engine.connectionMessage {
+                            HStack(alignment: .top, spacing: 6) {
+                                Image(systemName: msg.hasPrefix("✓") ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(msg.hasPrefix("✓") ? .green : .red)
+                                Text(msg)
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(msg.hasPrefix("✓") ? .green : .red)
+                            }
+                            .padding(.vertical, 2)
+                        }
                     } else {
                         TextField("Endpoint URL", text: $config.customEndpoint, prompt: Text("http://localhost:11434/v1/chat/completions"))
                             .font(.system(size: 13, design: .monospaced))
+
+                        Button {
+                            MobileHaptics.trigger(.medium)
+                            Task {
+                                _ = await engine.testAPIConnection()
+                            }
+                        } label: {
+                            HStack(spacing: 8) {
+                                if engine.testingConnection {
+                                    ProgressView().controlSize(.small)
+                                }
+                                Text(engine.testingConnection ? "Connecting to Ollama..." : "Test Local Ollama Connection")
+                                    .font(.system(size: 13, weight: .semibold))
+                            }
+                            .foregroundColor(FluidTheme.musicRed)
+                        }
+                        .disabled(engine.testingConnection)
                     }
                 }
 
@@ -645,35 +698,25 @@ public struct AISettingsSheet: View {
                 Section {
                     Button {
                         MobileHaptics.trigger(.medium)
-                        engine.testingConnection = true
-                        engine.connectionMessage = nil
                         Task {
                             await engine.curateEntireLibrary(force: true)
-                            engine.testingConnection = false
-                            if let err = engine.lastSyncError {
-                                engine.connectionMessage = "Failed: \(err)"
-                            } else {
-                                engine.connectionMessage = "Success! \(engine.curatedLibrary.categories.count) languages organized."
-                            }
                         }
                     } label: {
                         HStack {
-                            if engine.testingConnection {
+                            if engine.isCurating {
                                 ProgressView()
                                     .padding(.trailing, 6)
                             }
-                            Text("Re-Analyze Entire Offline Library")
+                            Text(engine.isCurating ? "Organizing Songs with AI..." : "Re-Organize Entire Offline Library with AI")
                                 .font(.system(size: 15, weight: .semibold))
                         }
                         .foregroundColor(FluidTheme.musicRed)
                     }
-                    .disabled(engine.testingConnection)
+                    .disabled(engine.isCurating || engine.testingConnection)
 
-                    if let msg = engine.connectionMessage {
-                        Text(msg)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(msg.hasPrefix("Success") ? .green : .red)
-                    }
+                    Text("Sends all downloaded songs to the AI to re-classify them into language and genre playlists.")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
                 }
             }
             .navigationTitle("AI Curator Settings")

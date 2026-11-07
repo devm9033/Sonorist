@@ -310,6 +310,44 @@ public struct SettingsView: View {
                             .frame(width: 200)
                         }
                         .padding(14)
+
+                        Divider().opacity(0.2)
+
+                        HStack {
+                            Button {
+                                FluidHaptics.tap()
+                                Task {
+                                    _ = await AIPlaylistEngine.shared.testAPIConnection()
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    if AIPlaylistEngine.shared.testingConnection {
+                                        ProgressView().controlSize(.small)
+                                    } else {
+                                        Image(systemName: "checkmark.shield.fill")
+                                    }
+                                    Text(AIPlaylistEngine.shared.testingConnection ? "Verifying..." : "Test API Key & Verify")
+                                        .font(.system(size: 12, weight: .medium))
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(FluidTheme.musicRed.opacity(0.12))
+                                .foregroundColor(FluidTheme.musicRed)
+                                .cornerRadius(6)
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            .disabled(AIPlaylistEngine.shared.testingConnection || AIProviderConfig.shared.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                            if let msg = AIPlaylistEngine.shared.connectionMessage {
+                                Text(msg)
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundColor(msg.hasPrefix("✓") ? .green : .red)
+                                    .padding(.leading, 6)
+                                    .lineLimit(1)
+                            }
+                            Spacer()
+                        }
+                        .padding(14)
                     }
                 }
             }
