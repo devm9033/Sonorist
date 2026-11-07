@@ -2,17 +2,18 @@ import SwiftUI
 
 public final class MobileNowPlayingSheetModel: ObservableObject {
     public static let shared = MobileNowPlayingSheetModel()
-    
+
     @Published public var showLyrics: Bool = false
     @Published public var dragOffset: CGFloat = 0
     @Published public var artworkDragOffset: CGFloat = 0
     @Published public var isDraggingArtwork: Bool = false
+    @Published public var isAnimatingTrackTransition: Bool = false
     @Published public var isSeeking: Bool = false
     @Published public var seekPosition: Double = 0
     @Published public var showQueueSheet: Bool = false
     @Published public var showSleepTimerSheet: Bool = false
     @Published public var showEqualizerSheet: Bool = false
-    
+
     public init() {}
 }
 
@@ -25,18 +26,18 @@ public struct MobileNowPlayingSheet: View {
     @ObservedObject private var model = MobileNowPlayingSheetModel.shared
     @ObservedObject private var audioSession = iOSAudioSessionManager.shared
     @Binding public var isPresented: Bool
-    
+
     public init(isPresented: Binding<Bool>) {
         self._isPresented = isPresented
     }
-    
+
     public var body: some View {
         GeometryReader { rootGeo in
             let screenWidth = rootGeo.size.width
             let screenHeight = rootGeo.size.height
             let contentWidth = max(280, screenWidth - 48)
             let topBarWidth = max(280, screenWidth - 32)
-            
+
             // Safe top inset to ensure grabber and header sit fully clear of Dynamic Island
             let safeTop: CGFloat = {
                 #if os(iOS)
@@ -48,18 +49,18 @@ public struct MobileNowPlayingSheet: View {
                 return max(59, rootGeo.safeAreaInsets.top)
             }()
             let topSafePadding = safeTop + 8
-            
+
             ZStack {
                 // Ambient Backdrop Derived from Artwork
                 ambientBackground
                     .ignoresSafeArea()
-                
+
                 VStack(spacing: 0) {
                     // Top Apple Music Centered Grabber Bar (Safely below Dynamic Island)
                     grabberHandle
                         .padding(.top, topSafePadding)
                         .padding(.bottom, 6)
-                    
+
                     // Centered Header & Actions (Equatable - completely isolated from playback re-render thrashing)
                     NowPlayingHeaderRow(
                         width: topBarWidth,
@@ -81,48 +82,50 @@ public struct MobileNowPlayingSheet: View {
                     )
                     .equatable()
                     .padding(.bottom, 10)
-                    
+
                     // Auxiliary Lyrics & Story Pills (visible when lyrics mode is active)
                     if model.showLyrics {
                         lyricsAuxiliaryBar(width: contentWidth)
                             .padding(.bottom, 8)
                             .transition(.opacity.combined(with: .move(edge: .top)))
                     }
-                    
+
                     // Music DNA Track Story Drawer
                     if model.showLyrics && player.showTrackStory {
                         trackStoryDrawer(width: contentWidth)
                             .padding(.bottom, 8)
                             .transition(.opacity.combined(with: .move(edge: .top)))
                     }
-                    
+
+                    let artworkSize = min(contentWidth - 24, max(220, screenHeight * 0.35))
+
                     // Flexible Middle Stage: Artwork or Scrolling Lyrics (Smooth cross-fade, zero layout thrashing)
                     ZStack {
-                        largeArtworkView(size: min(contentWidth - 24, max(220, screenHeight * 0.35)))
+                        largeArtworkView(size: artworkSize)
                             .opacity(model.showLyrics ? 0 : 1)
                             .scaleEffect(model.showLyrics ? 0.92 : 1.0)
                             .allowsHitTesting(!model.showLyrics)
-                        
+
                         scrollingLyricsView(width: contentWidth)
                             .opacity(model.showLyrics ? 1 : 0)
                             .allowsHitTesting(model.showLyrics)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    
+
                     Spacer(minLength: 4)
-                    
+
                     // Track Metadata & Favorite Heart
                     metadataRow(width: contentWidth)
                         .padding(.bottom, 12)
-                    
+
                     // Scrubber & Timestamps (Isolated from parent view updates)
                     NowPlayingScrubberSection(width: contentWidth)
                         .padding(.bottom, 14)
-                    
+
                     // Transport Playback Controls
-                    transportControls(width: contentWidth)
+                    transportControls(width: contentWidth, artworkSize: artworkSize)
                         .padding(.bottom, 14)
-                    
+
                     // Bottom Accessories: Lyrics Toggle, Audio Route, Queue
                     bottomAccessoryBar(width: contentWidth)
                         .padding(.bottom, 34)
@@ -178,16 +181,16 @@ public struct MobileNowPlayingSheet: View {
                 .presentationCornerRadius(28)
         }
     }
-    
+
     // MARK: - Ambient Backdrop
-    
+
     private var ambientBackground: some View {
         AmbientArtworkBackdrop(artworkURL: player.currentTrack?.artworkURL, colorScheme: colorScheme)
             .equatable()
     }
-    
+
     // MARK: - Top Grabber Handle & Header
-    
+
     private var grabberHandle: some View {
         Button {
             MobileHaptics.trigger(.light)
@@ -225,9 +228,9 @@ public struct MobileNowPlayingSheet: View {
                 }
         )
     }
-    
+
     // MARK: - Auxiliary Control Pills (Romaji, Translate, Story & Sync)
-    
+
     private func lyricsAuxiliaryBar(width: CGFloat) -> some View {
         HStack(spacing: 6) {
             // Romaji / Transliteration Pill
@@ -252,7 +255,7 @@ public struct MobileNowPlayingSheet: View {
             }
             .buttonStyle(PlainButtonStyle())
             .fixedSize(horizontal: true, vertical: false)
-            
+
             // AI Translation Pill
             Button {
                 MobileHaptics.trigger(.selection)
@@ -281,7 +284,7 @@ public struct MobileNowPlayingSheet: View {
             .buttonStyle(PlainButtonStyle())
             .fixedSize(horizontal: true, vertical: false)
             .animation(nil, value: player.isTranslatingLyrics)
-            
+
             // Music DNA Song Story Pill
             Button {
                 withAnimation(FluidTheme.fluidSpring) {
@@ -310,7 +313,7 @@ public struct MobileNowPlayingSheet: View {
             }
             .buttonStyle(PlainButtonStyle())
             .fixedSize(horizontal: true, vertical: false)
-            
+
             // Sync Offset Adjuster Menu
             Menu {
                 Button {
@@ -318,13 +321,13 @@ public struct MobileNowPlayingSheet: View {
                 } label: {
                     Label("Earlier (-0.5s)", systemImage: "minus.circle")
                 }
-                
+
                 Button {
                     player.adjustLyricOffset(by: +0.5)
                 } label: {
                     Label("Later (+0.5s)", systemImage: "plus.circle")
                 }
-                
+
                 if player.userLyricOffset != 0 {
                     Button {
                         player.resetLyricOffset()
@@ -349,7 +352,7 @@ public struct MobileNowPlayingSheet: View {
             }
             .buttonStyle(PlainButtonStyle())
             .fixedSize(horizontal: true, vertical: false)
-            
+
             // Reload Lyrics Pill
             Button {
                 MobileHaptics.trigger(.selection)
@@ -376,13 +379,13 @@ public struct MobileNowPlayingSheet: View {
         }
         .frame(maxWidth: .infinity, alignment: .center)
     }
-    
+
     // MARK: - Track Story Drawer Card
-    
+
     private func trackStoryDrawer(width: CGFloat) -> some View {
         let story = player.trackStory
         let isLight = colorScheme == .light
-        
+
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Image(systemName: "sparkles")
@@ -391,7 +394,7 @@ public struct MobileNowPlayingSheet: View {
                 Text("Track Story & Meaning")
                     .font(.system(size: 12, weight: .bold, design: .rounded))
                     .foregroundColor(isLight ? .primary : .white)
-                
+
                 if let genre = story?.genre {
                     Text(genre)
                         .font(.system(size: 9, weight: .semibold, design: .rounded))
@@ -401,9 +404,9 @@ public struct MobileNowPlayingSheet: View {
                         .background(Color.purple.opacity(0.2))
                         .clipShape(Capsule())
                 }
-                
+
                 Spacer()
-                
+
                 if let year = story?.releaseYear {
                     Text(year)
                         .font(.system(size: 9, weight: .semibold, design: .monospaced))
@@ -413,7 +416,7 @@ public struct MobileNowPlayingSheet: View {
                         .background(isLight ? Color.primary.opacity(0.08) : Color.white.opacity(0.12))
                         .clipShape(Capsule())
                 }
-                
+
                 Button {
                     withAnimation(FluidTheme.fluidSpring) {
                         player.showTrackStory = false
@@ -425,7 +428,7 @@ public struct MobileNowPlayingSheet: View {
                 }
                 .buttonStyle(PlainButtonStyle())
             }
-            
+
             if let story = story {
                 Text(story.summary)
                     .font(.system(size: 11, weight: .regular))
@@ -457,9 +460,9 @@ public struct MobileNowPlayingSheet: View {
                 .stroke(Color.white.opacity(0.15), lineWidth: 0.5)
         )
     }
-    
+
     // MARK: - Large Artwork Stage (Fluid Carousel + Directional Slide Transitions)
-    
+
     @ViewBuilder
     private func singleArtworkCard(track: Track, size: CGFloat, isLight: Bool) -> some View {
         TrackArtworkView(
@@ -474,72 +477,83 @@ public struct MobileNowPlayingSheet: View {
         .scaleEffect(player.isPlaying ? 1.0 : 0.92)
         .animation(FluidTheme.fluidSpring, value: player.isPlaying)
     }
-    
+
     private func largeArtworkView(size: CGFloat) -> some View {
         let isLight = colorScheme == .light
         let nextTrack = player.getNextTrackInQueue()
         let prevTrack = player.getPreviousTrackInQueue()
-        
+        let stride = size + 20
+
         return ZStack {
             if player.isCrossfading, let outgoing = player.outgoingTrack, let incoming = player.incomingTrack {
-                // MARK: Real-Time Audio-Synced Visual Crossfade
-                // Outgoing art slides left and fades out, incoming art enters from right and fades inside
+                // MARK: Real-Time Audio-Synced Visual Crossfade (Natural Track End)
+                // Pure horizontal glide along X-axis with equal-power audio crossfade; NO rotation.
                 let p = player.crossfadeProgress
                 let isFwd = player.slideDirection == .forward
-                let travel = size * 0.70
-                
-                // Outgoing Album Art: slides left (forward) and dissolves out
+                let travel = size * 0.60
+
+                // Outgoing Album Art: slides horizontally and dissolves out
                 singleArtworkCard(track: outgoing, size: size, isLight: isLight)
                     .offset(x: isFwd ? -p * travel : p * travel)
-                    .rotationEffect(.degrees(isFwd ? min(0, -p * 6.0) : max(0, p * 6.0)))
                     .scaleEffect(1.0 - (p * 0.08))
                     .opacity(max(0.0, 1.0 - p))
-                
-                // Incoming Album Art: enters from right (forward) and dissolves inside
+
+                // Incoming Album Art: enters horizontally from opposite edge and dissolves inside
                 singleArtworkCard(track: incoming, size: size, isLight: isLight)
                     .offset(x: isFwd ? (1.0 - p) * travel : -(1.0 - p) * travel)
-                    .rotationEffect(.degrees(isFwd ? max(0, (1.0 - p) * 6.0) : min(0, -(1.0 - p) * 6.0)))
                     .scaleEffect(0.92 + (p * 0.08))
                     .opacity(min(1.0, p))
-                    
-            } else if model.isDraggingArtwork || model.artworkDragOffset != 0 {
-                // MARK: Direct Manipulation Dragging / Peeking Mode
-                // Previous song peeking from leading/left when swiping right
-                if model.artworkDragOffset > 0, let prev = prevTrack {
-                    singleArtworkCard(track: prev, size: size, isLight: isLight)
-                        .offset(x: model.artworkDragOffset - size - 24)
-                        .rotationEffect(.degrees(min(10.0, max(-10.0, Double((model.artworkDragOffset - size - 24) / 36.0)))))
-                        .scaleEffect(0.92 + min(0.08, abs(model.artworkDragOffset) / size * 0.08))
-                        .opacity(min(1.0, 0.45 + abs(model.artworkDragOffset) / size * 0.55))
-                }
-                
-                // Next song peeking from trailing/right when swiping left
-                if model.artworkDragOffset < 0, let next = nextTrack {
-                    singleArtworkCard(track: next, size: size, isLight: isLight)
-                        .offset(x: model.artworkDragOffset + size + 24)
-                        .rotationEffect(.degrees(min(10.0, max(-10.0, Double((model.artworkDragOffset + size + 24) / 36.0)))))
-                        .scaleEffect(0.92 + min(0.08, abs(model.artworkDragOffset) / size * 0.08))
-                        .opacity(min(1.0, 0.45 + abs(model.artworkDragOffset) / size * 0.55))
-                }
-                
-                // Active Card tracking finger
-                if let current = player.currentTrack {
-                    singleArtworkCard(track: current, size: size, isLight: isLight)
-                        .offset(x: model.artworkDragOffset)
-                        .rotationEffect(.degrees(min(12.0, max(-12.0, Double(model.artworkDragOffset / 28.0)))))
-                        .scaleEffect(1.0 - min(0.06, abs(model.artworkDragOffset) / 1000.0))
-                }
+
             } else {
-                // MARK: Settled Programmatic Mode
+                // MARK: Unified Horizontal Rail Carousel (Buttons + Flick Gesture)
+                // Both flick gesture and transport buttons drive model.artworkDragOffset.
+                // Pure horizontal motion: no tilt, no circular stack rotation, minimalist Apple design.
+                let offset = model.artworkDragOffset
+                let isTransitioning = model.isDraggingArtwork || model.isAnimatingTrackTransition || offset != 0
+
+                // Previous track card (sits to the left at offset - stride)
+                if let prev = prevTrack {
+                    let cardOffset = offset - stride
+                    let distFromCenter = abs(cardOffset)
+                    let normDist = min(1.0, distFromCenter / stride)
+                    let scale = 1.0 - (normDist * 0.08)
+                    let opacity = isTransitioning ? max(0.0, min(1.0, 1.0 - (normDist * 0.50))) : 0.0
+
+                    if opacity > 0.01 {
+                        singleArtworkCard(track: prev, size: size, isLight: isLight)
+                            .offset(x: cardOffset)
+                            .scaleEffect(scale)
+                            .opacity(opacity)
+                    }
+                }
+
+                // Next track card (sits to the right at offset + stride)
+                if let next = nextTrack {
+                    let cardOffset = offset + stride
+                    let distFromCenter = abs(cardOffset)
+                    let normDist = min(1.0, distFromCenter / stride)
+                    let scale = 1.0 - (normDist * 0.08)
+                    let opacity = isTransitioning ? max(0.0, min(1.0, 1.0 - (normDist * 0.50))) : 0.0
+
+                    if opacity > 0.01 {
+                        singleArtworkCard(track: next, size: size, isLight: isLight)
+                            .offset(x: cardOffset)
+                            .scaleEffect(scale)
+                            .opacity(opacity)
+                    }
+                }
+
+                // Center / Active Track card (sits at offset)
                 if let current = player.currentTrack {
+                    let distFromCenter = abs(offset)
+                    let normDist = min(1.0, distFromCenter / stride)
+                    let scale = 1.0 - (normDist * 0.08)
+                    let opacity = max(0.40, 1.0 - (normDist * 0.45))
+
                     singleArtworkCard(track: current, size: size, isLight: isLight)
-                        .id(current.id)
-                        .transition(.asymmetric(
-                            insertion: .move(edge: player.slideDirection == .forward ? .trailing : .leading)
-                                .combined(with: .opacity),
-                            removal: .move(edge: player.slideDirection == .forward ? .leading : .trailing)
-                                .combined(with: .opacity)
-                        ))
+                        .offset(x: offset)
+                        .scaleEffect(scale)
+                        .opacity(opacity)
                 } else {
                     RoundedRectangle(cornerRadius: 22, style: .continuous)
                         .fill(Color.white.opacity(0.1))
@@ -549,24 +563,24 @@ public struct MobileNowPlayingSheet: View {
         }
         .frame(width: size, height: size)
         .contentShape(Rectangle())
-        .animation(player.isCrossfading ? nil : FluidTheme.fluidSpring, value: player.currentTrack?.id)
         .simultaneousGesture(
             DragGesture(minimumDistance: 8)
                 .onChanged { value in
                     guard !model.showLyrics else { return }
-                    
+                    guard !model.isAnimatingTrackTransition else { return }
+
                     let dx = value.translation.width
                     let dy = value.translation.height
-                    
+
                     if !model.isDraggingArtwork {
                         // Disambiguate: only capture horizontal swipes, leave vertical for pull-to-dismiss
                         if abs(dx) > abs(dy) * 1.1 && abs(dx) > 8 {
                             model.isDraggingArtwork = true
                         }
                     }
-                    
+
                     guard model.isDraggingArtwork else { return }
-                    
+
                     // Progressive physical rubber-banding resistance at boundaries (Apple HIG: very gentle reaction, max ~20pt)
                     if dx > 0 && prevTrack == nil {
                         let absDx = abs(dx)
@@ -582,11 +596,12 @@ public struct MobileNowPlayingSheet: View {
                 }
                 .onEnded { value in
                     guard model.isDraggingArtwork else { return }
-                    
+
                     let dx = model.artworkDragOffset
                     let predicted = value.predictedEndTranslation.width
                     let threshold: CGFloat = 55
-                    
+                    let stride = size + 20
+
                     // 1. Boundary on first track: pulling right when no previous track exists
                     if dx > 0 && prevTrack == nil {
                         MobileHaptics.trigger(.selection)
@@ -601,7 +616,7 @@ public struct MobileNowPlayingSheet: View {
                         }
                         return
                     }
-                    
+
                     // 2. Boundary on last track: pulling left when no next track exists
                     if dx < 0 && nextTrack == nil {
                         MobileHaptics.trigger(.selection)
@@ -613,15 +628,14 @@ public struct MobileNowPlayingSheet: View {
                         }
                         return
                     }
-                    
+
                     // 3. Flick Left -> Smoothly continue sliding out to left, slide next track into center
                     if (dx < -threshold || predicted < -120), let next = nextTrack {
                         MobileHaptics.trigger(.medium)
-                        let targetOffset = -size - 24
                         withAnimation(FluidTheme.fluidSpring) {
-                            model.artworkDragOffset = targetOffset
+                            model.artworkDragOffset = -stride
                         }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.30) {
                             player.slideDirection = .forward
                             player.forceNextTrack()
                             model.artworkDragOffset = 0
@@ -630,11 +644,10 @@ public struct MobileNowPlayingSheet: View {
                     } else if (dx > threshold || predicted > 120), let prev = prevTrack {
                         // 4. Flick Right -> Smoothly continue sliding out to right, slide previous track into center
                         MobileHaptics.trigger(.medium)
-                        let targetOffset = size + 24
                         withAnimation(FluidTheme.fluidSpring) {
-                            model.artworkDragOffset = targetOffset
+                            model.artworkDragOffset = stride
                         }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.30) {
                             player.slideDirection = .backward
                             player.forcePreviousTrack()
                             model.artworkDragOffset = 0
@@ -645,16 +658,16 @@ public struct MobileNowPlayingSheet: View {
                         withAnimation(FluidTheme.fluidSpring) {
                             model.artworkDragOffset = 0
                         }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.30) {
                             model.isDraggingArtwork = false
                         }
                     }
                 }
         )
     }
-    
+
     // MARK: - Scrolling Karaoke Lyrics Stage
-    
+
     private func scrollingLyricsView(width: CGFloat) -> some View {
         ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: false) {
@@ -668,24 +681,24 @@ public struct MobileNowPlayingSheet: View {
                             Text(player.isLyricsSynced ? "Synced Karaoke" : "Unsynced Full Text")
                                 .font(.system(size: 10, weight: .semibold, design: .rounded))
                                 .foregroundColor(colorScheme == .light ? Color.secondary : Color.white.opacity(0.65))
-                            
+
                             Spacer()
                         }
                         .padding(.horizontal, 24)
                         .padding(.top, 4)
                     }
-                    
+
                     if player.lyricLines.isEmpty {
                         VStack(spacing: 12) {
                             Image(systemName: "music.mic")
                                 .font(.system(size: 36))
                                 .foregroundColor(colorScheme == .light ? Color.secondary.opacity(0.5) : Color.white.opacity(0.5))
-                            
+
                             Text(player.isLoadingLyrics ? "Loading synchronized lyrics..." : "No synchronized lyrics available.")
                                 .font(.system(size: 14, weight: .medium))
                                 .foregroundColor(colorScheme == .light ? Color.secondary : Color.white.opacity(0.65))
                                 .multilineTextAlignment(.center)
-                            
+
                             if !player.isLoadingLyrics {
                                 Button {
                                     MobileHaptics.trigger(.medium)
@@ -714,7 +727,7 @@ public struct MobileNowPlayingSheet: View {
                     } else {
                         ForEach(player.lyricLines) { line in
                             let isActive = player.isLyricsSynced && (player.activeLyricIndex >= 0 && player.activeLyricIndex < player.lyricLines.count && player.lyricLines[player.activeLyricIndex].id == line.id)
-                            
+
                             VStack(alignment: .leading, spacing: 3) {
                                 // 1. Phonetic Romanization (Romaji / Pinyin)
                                 if player.showRomanization, let romaji = line.romanization, !romaji.isEmpty {
@@ -724,7 +737,7 @@ public struct MobileNowPlayingSheet: View {
                                         .fixedSize(horizontal: false, vertical: true)
                                         .frame(width: width, alignment: .leading)
                                 }
-                                
+
                                 // 2. Main Synchronized Lyric Line
                                 Text(line.text)
                                     .font(.system(size: isActive ? 26 : 18, weight: isActive ? .bold : .semibold, design: .rounded))
@@ -733,7 +746,7 @@ public struct MobileNowPlayingSheet: View {
                                     .multilineTextAlignment(.leading)
                                     .fixedSize(horizontal: false, vertical: true)
                                     .frame(width: width, alignment: .leading)
-                                
+
                                 // 3. AI Translation Subtitle
                                 if player.showTranslation, let translation = line.translation, !translation.isEmpty {
                                     Text(translation)
@@ -775,9 +788,9 @@ public struct MobileNowPlayingSheet: View {
             }
         }
     }
-    
+
     // MARK: - Track Metadata Row
-    
+
     private func metadataRow(width: CGFloat) -> some View {
         let activeTrack: Track? = {
             if player.isCrossfading {
@@ -785,7 +798,7 @@ public struct MobileNowPlayingSheet: View {
             }
             return player.currentTrack
         }()
-        
+
         let metadataOpacity: Double = {
             if player.isCrossfading {
                 let p = player.crossfadeProgress
@@ -793,7 +806,7 @@ public struct MobileNowPlayingSheet: View {
             }
             return 1.0
         }()
-        
+
         return HStack(alignment: .center, spacing: 14) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(activeTrack?.title ?? "Sonorist")
@@ -802,14 +815,14 @@ public struct MobileNowPlayingSheet: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
                     .opacity(metadataOpacity)
-                
+
                 HStack(spacing: 6) {
                     if activeTrack?.isCached == true {
                         Image(systemName: "arrow.down.circle.fill")
                             .font(.system(size: 11))
                             .foregroundColor(FluidTheme.downloadGreen)
                     }
-                    
+
                     Text(activeTrack?.artist ?? "Select a track to play")
                         .font(.system(size: 15, weight: .medium))
                         .foregroundColor(colorScheme == .light ? .secondary : .white.opacity(0.7))
@@ -819,9 +832,9 @@ public struct MobileNowPlayingSheet: View {
                 .opacity(metadataOpacity)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            
+
             Spacer(minLength: 8)
-            
+
             if let track = activeTrack {
                 Button {
                     MobileHaptics.trigger(.heavy)
@@ -839,10 +852,86 @@ public struct MobileNowPlayingSheet: View {
         }
         .frame(width: width)
     }
-    
+
+    // MARK: - Animated Track Navigations (Synchronized with Artwork Carousel)
+
+    private func animateToNextTrack(size: CGFloat) {
+        guard !model.isAnimatingTrackTransition, !model.isDraggingArtwork else { return }
+        guard let _ = player.getNextTrackInQueue() else {
+            // Subtle edge rubber-band bounce when no next track exists
+            MobileHaptics.trigger(.selection)
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                model.artworkDragOffset = -20
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+                    model.artworkDragOffset = 0
+                }
+            }
+            return
+        }
+
+        model.isAnimatingTrackTransition = true
+        MobileHaptics.trigger(.medium)
+        player.slideDirection = .forward
+
+        let stride = size + 20
+        withAnimation(FluidTheme.fluidSpring) {
+            model.artworkDragOffset = -stride
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.30) {
+            player.forceNextTrack()
+            model.artworkDragOffset = 0
+            model.isAnimatingTrackTransition = false
+        }
+    }
+
+    private func animateToPreviousTrack(size: CGFloat) {
+        guard !model.isAnimatingTrackTransition, !model.isDraggingArtwork else { return }
+
+        // Apple Music HIG: If more than 3 seconds into track, rewind to start
+        if player.currentTime > 3.0 {
+            MobileHaptics.trigger(.medium)
+            player.seek(to: 0)
+            return
+        }
+
+        guard let _ = player.getPreviousTrackInQueue() else {
+            MobileHaptics.trigger(.selection)
+            if player.currentTime > 0 {
+                player.seek(to: 0)
+            }
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                model.artworkDragOffset = 20
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+                    model.artworkDragOffset = 0
+                }
+            }
+            return
+        }
+
+        model.isAnimatingTrackTransition = true
+        MobileHaptics.trigger(.medium)
+        player.slideDirection = .backward
+
+        let stride = size + 20
+        withAnimation(FluidTheme.fluidSpring) {
+            model.artworkDragOffset = stride
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.30) {
+            player.forcePreviousTrack()
+            model.artworkDragOffset = 0
+            model.isAnimatingTrackTransition = false
+        }
+    }
+
     // MARK: - Transport Controls
-    
-    private func transportControls(width: CGFloat) -> some View {
+
+    private func transportControls(width: CGFloat, artworkSize: CGFloat) -> some View {
         HStack(spacing: 34) {
             Button {
                 MobileHaptics.trigger(.light)
@@ -853,17 +942,16 @@ public struct MobileNowPlayingSheet: View {
                     .foregroundColor(player.isShuffle ? FluidTheme.musicRed : (colorScheme == .light ? .secondary : .white.opacity(0.65)))
             }
             .buttonStyle(PlainButtonStyle())
-            
+
             Button {
-                MobileHaptics.trigger(.medium)
-                player.previous()
+                animateToPreviousTrack(size: artworkSize)
             } label: {
                 Image(systemName: "backward.fill")
                     .font(.system(size: 26))
                     .foregroundColor(colorScheme == .light ? .primary : .white)
             }
             .buttonStyle(PlainButtonStyle())
-            
+
             Button {
                 MobileHaptics.trigger(.heavy)
                 player.togglePlayPause()
@@ -873,17 +961,16 @@ public struct MobileNowPlayingSheet: View {
                     .foregroundColor(FluidTheme.musicRed)
             }
             .buttonStyle(PlainButtonStyle())
-            
+
             Button {
-                MobileHaptics.trigger(.medium)
-                player.next()
+                animateToNextTrack(size: artworkSize)
             } label: {
                 Image(systemName: "forward.fill")
                     .font(.system(size: 26))
                     .foregroundColor(colorScheme == .light ? .primary : .white)
             }
             .buttonStyle(PlainButtonStyle())
-            
+
             Button {
                 MobileHaptics.trigger(.light)
                 player.toggleRepeatMode()
@@ -896,9 +983,9 @@ public struct MobileNowPlayingSheet: View {
         }
         .frame(width: width)
     }
-    
+
     // MARK: - Bottom Accessories (Apple Music 3-Control Standard)
-    
+
     private func bottomAccessoryBar(width: CGFloat) -> some View {
         HStack {
             // 1. Lyrics Toggle (Left)
@@ -916,25 +1003,25 @@ public struct MobileNowPlayingSheet: View {
             }
             .buttonStyle(PlainButtonStyle())
             .accessibilityLabel("Lyrics")
-            
+
             Spacer()
-            
+
             // 2. AirPlay Destination Picker (Center - Iconic Apple AirPlay symbol)
             ZStack {
                 Image(systemName: "airplayaudio")
                     .font(.system(size: 20, weight: .medium))
                     .foregroundColor(colorScheme == .light ? .secondary : .white.opacity(0.65))
                     .frame(width: 44, height: 44)
-                
+
                 #if os(iOS)
                 AirPlayRoutePickerOverlay()
                     .frame(width: 44, height: 44)
                 #endif
             }
             .accessibilityLabel("AirPlay Audio Destination")
-            
+
             Spacer()
-            
+
             // 3. Up Next Queue Button (Right)
             Button {
                 MobileHaptics.trigger(.selection)
@@ -950,9 +1037,9 @@ public struct MobileNowPlayingSheet: View {
         }
         .frame(width: width)
     }
-    
+
     // MARK: - Helper Methods
-    
+
     private func ensureLyricsLoaded() {
         if player.lyricLines.isEmpty, let track = player.currentTrack {
             Task {
@@ -960,7 +1047,7 @@ public struct MobileNowPlayingSheet: View {
             }
         }
     }
-    
+
     private func loadDemoLyrics() {
         let cur = player.currentTime
         player.lyricLines = [
@@ -974,7 +1061,7 @@ public struct MobileNowPlayingSheet: View {
         ]
         player.isLyricsSynced = true
     }
-    
+
     private func formatDuration(_ seconds: Double) -> String {
         guard !seconds.isNaN && !seconds.isInfinite else { return "0:00" }
         let total = Int(seconds)
@@ -994,7 +1081,7 @@ private struct NowPlayingScrubberSection: View {
     @ObservedObject private var player = AudioPlayerEngine.shared
     @ObservedObject private var progressTracker = PlaybackProgressTracker.shared
     @ObservedObject private var model = MobileNowPlayingSheetModel.shared
-    
+
     var body: some View {
         VStack(spacing: 8) {
             let current: Double = {
@@ -1006,19 +1093,19 @@ private struct NowPlayingScrubberSection: View {
                 guard player.duration > 0 && player.duration.isFinite && !player.duration.isNaN else { return 0 }
                 return max(0, min(current / player.duration, 1.0))
             }()
-            
+
             // Interactive Scrubber Bar
             ZStack(alignment: .leading) {
                 // Background Track
                 Capsule()
                     .fill(colorScheme == .light ? Color.primary.opacity(0.12) : Color.white.opacity(0.24))
                     .frame(width: width, height: 5)
-                
+
                 // Active Progress Track
                 Capsule()
                     .fill(FluidTheme.musicRed)
                     .frame(width: max(0, min(width * CGFloat(ratio), width)), height: 5)
-                
+
                 // Scrubber Thumb Handle
                 Circle()
                     .fill(colorScheme == .light ? Color.primary : Color.white)
@@ -1041,15 +1128,15 @@ private struct NowPlayingScrubberSection: View {
                         model.isSeeking = false
                     }
             )
-            
+
             // Timestamps: Elapsed (left) & Remaining (right)
             HStack {
                 Text(formatDuration(current))
                     .font(.system(size: 12, weight: .semibold, design: .monospaced))
                     .foregroundColor(colorScheme == .light ? .secondary : .white.opacity(0.75))
-                
+
                 Spacer()
-                
+
                 let remaining = max(0, player.duration - current)
                 Text("-" + formatDuration(remaining))
                     .font(.system(size: 12, weight: .semibold, design: .monospaced))
@@ -1058,7 +1145,7 @@ private struct NowPlayingScrubberSection: View {
             .frame(width: width)
         }
     }
-    
+
     private func formatDuration(_ seconds: Double) -> String {
         guard !seconds.isNaN && !seconds.isInfinite else { return "0:00" }
         let total = Int(seconds)
@@ -1079,7 +1166,7 @@ private struct NowPlayingHeaderRow: View, Equatable {
     let currentTrack: Track?
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject private var player = AudioPlayerEngine.shared
-    
+
     static func == (lhs: NowPlayingHeaderRow, rhs: NowPlayingHeaderRow) -> Bool {
         lhs.width == rhs.width &&
         lhs.isOffline == rhs.isOffline &&
@@ -1087,7 +1174,7 @@ private struct NowPlayingHeaderRow: View, Equatable {
         lhs.currentTrack?.id == rhs.currentTrack?.id &&
         lhs.player.sleepTimerRemainingSeconds == rhs.player.sleepTimerRemainingSeconds
     }
-    
+
     var body: some View {
         HStack {
             // Bedtime Sleep Timer Button (Top-Left Quick Access)
@@ -1100,7 +1187,7 @@ private struct NowPlayingHeaderRow: View, Equatable {
                         .font(.system(size: 20))
                         .foregroundColor(player.sleepTimerRemainingSeconds > 0 ? FluidTheme.musicRed : (colorScheme == .light ? .secondary : .white.opacity(0.8)))
                         .frame(width: 44, height: 44)
-                    
+
                     if player.sleepTimerRemainingSeconds > 0 {
                         Circle()
                             .fill(FluidTheme.musicRed)
@@ -1112,23 +1199,23 @@ private struct NowPlayingHeaderRow: View, Equatable {
             }
             .buttonStyle(PlainButtonStyle())
             .accessibilityLabel(player.sleepTimerRemainingSeconds > 0 ? "Sleep Timer: \(player.formattedSleepTimerRemaining)" : "Sleep Timer")
-            
+
             Spacer()
-            
+
             VStack(spacing: 2) {
                 Text(isOffline ? "PLAYING OFFLINE" : "PLAYING FROM")
                     .font(.system(size: 10, weight: .bold, design: .rounded))
                     .foregroundColor(colorScheme == .light ? .secondary : .white.opacity(0.55))
                     .tracking(1.0)
-                
+
                 Text(albumTitle)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(colorScheme == .light ? .primary : .white)
                     .lineLimit(1)
             }
-            
+
             Spacer()
-            
+
             NowPlayingEllipsisMenu(track: currentTrack)
                 .equatable()
         }
@@ -1140,7 +1227,7 @@ private struct NowPlayingEllipsisMenu: View, Equatable {
     let track: Track?
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject private var player = AudioPlayerEngine.shared
-    
+
     static func == (lhs: NowPlayingEllipsisMenu, rhs: NowPlayingEllipsisMenu) -> Bool {
         lhs.track?.id == rhs.track?.id &&
         lhs.player.equalizerPreset == rhs.player.equalizerPreset
@@ -1154,10 +1241,10 @@ private struct NowPlayingEllipsisMenu: View, Equatable {
             } label: {
                 Label("Equalizer (\(player.equalizerPreset))", systemImage: "slider.vertical.3")
             }
-            
+
             if let track = track, let shareURL = URL(string: "https://music.youtube.com/watch?v=\(track.id)") {
                 Divider()
-                
+
                 ShareLink(item: shareURL, subject: Text(track.title), message: Text("Listen to \(track.title) by \(track.artist) on Sonorist")) {
                     Label("Share Song", systemImage: "square.and.arrow.up")
                 }
@@ -1179,28 +1266,28 @@ public struct MobileQueueSheet: View {
     @ObservedObject private var themeManager = AppThemeManager.shared
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
-    
+
     public init() {}
-    
+
     private var effectiveColorScheme: ColorScheme {
         themeManager.currentTheme.colorScheme ?? colorScheme
     }
-    
+
     private var isLight: Bool {
         effectiveColorScheme == .light
     }
-    
+
     private var currentTrackIndex: Int? {
         guard let current = player.currentTrack else { return nil }
         return player.queue.firstIndex(where: { $0.id == current.id })
     }
-    
+
     private struct QueueRowEntry: Identifiable {
         let id: String
         let queueIndex: Int
         let track: Track
     }
-    
+
     private var upNextEntries: [QueueRowEntry] {
         guard !player.queue.isEmpty else { return [] }
         let startIndex = (currentTrackIndex.map { $0 + 1 }) ?? 0
@@ -1209,7 +1296,7 @@ public struct MobileQueueSheet: View {
             QueueRowEntry(id: "\(player.queue[idx].id)_\(idx)", queueIndex: idx, track: player.queue[idx])
         }
     }
-    
+
     public var body: some View {
         NavigationStack {
             List {
@@ -1224,13 +1311,13 @@ public struct MobileQueueSheet: View {
                                 placeholderIconSize: 20
                             )
                             .frame(width: 48, height: 48)
-                            
+
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(current.title)
                                     .font(.system(size: 15, weight: .semibold))
                                     .foregroundColor(FluidTheme.musicRed)
                                     .lineLimit(1)
-                                
+
                                 HStack(spacing: 4) {
                                     if current.isCached {
                                         Image(systemName: "arrow.down.circle.fill")
@@ -1243,9 +1330,9 @@ public struct MobileQueueSheet: View {
                                         .lineLimit(1)
                                 }
                             }
-                            
+
                             Spacer()
-                            
+
                             Image(systemName: player.isPlaying ? "waveform" : "pause.fill")
                                 .font(.system(size: 15, weight: .bold))
                                 .foregroundColor(FluidTheme.musicRed)
@@ -1261,7 +1348,7 @@ public struct MobileQueueSheet: View {
                             .foregroundColor(.secondary)
                     }
                 }
-                
+
                 // 2. Up Next Section
                 Section {
                     if upNextEntries.isEmpty {
@@ -1297,13 +1384,13 @@ public struct MobileQueueSheet: View {
                                         placeholderIconSize: 16
                                     )
                                     .frame(width: 42, height: 42)
-                                    
+
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(entry.track.title)
                                             .font(.system(size: 14, weight: .medium))
                                             .foregroundColor(isLight ? .primary : .white)
                                             .lineLimit(1)
-                                        
+
                                         HStack(spacing: 4) {
                                             if entry.track.isCached {
                                                 Image(systemName: "arrow.down.circle.fill")
@@ -1316,9 +1403,9 @@ public struct MobileQueueSheet: View {
                                                 .lineLimit(1)
                                         }
                                     }
-                                    
+
                                     Spacer()
-                                    
+
                                     Image(systemName: "play.circle")
                                         .font(.system(size: 20))
                                         .foregroundColor(isLight ? .secondary : .white.opacity(0.5))
@@ -1364,7 +1451,7 @@ public struct MobileQueueSheet: View {
                         }
                     }
                 }
-                
+
                 // 3. Autoplay Radio Toggle
                 Section {
                     Toggle(isOn: $player.isAutoplayEnabled) {
@@ -1418,15 +1505,15 @@ public struct MobileQueueSheet: View {
 public struct AmbientArtworkBackdrop: View, Equatable {
     let artworkURL: URL?
     let colorScheme: ColorScheme
-    
+
     public static func == (lhs: AmbientArtworkBackdrop, rhs: AmbientArtworkBackdrop) -> Bool {
         lhs.artworkURL == rhs.artworkURL && lhs.colorScheme == rhs.colorScheme
     }
-    
+
     public var body: some View {
         ZStack {
             Color.platformSystemBackground
-            
+
             if let url = artworkURL {
                 #if os(iOS)
                 if url.isFileURL, let uiImage = UIImage(contentsOfFile: url.path) {
@@ -1470,7 +1557,7 @@ public struct AmbientArtworkBackdrop: View, Equatable {
                 }
                 #endif
             }
-            
+
             if colorScheme == .light {
                 Color.platformSystemBackground
                     .opacity(0.68)

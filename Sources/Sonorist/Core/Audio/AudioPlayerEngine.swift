@@ -15,9 +15,9 @@ public enum SleepTimerOption: String, CaseIterable, Identifiable {
     case min45 = "45 minutes"
     case min60 = "1 hour"
     case endOfTrack = "End of track"
-    
+
     public var id: String { rawValue }
-    
+
     public var durationSeconds: Int? {
         switch self {
         case .off: return nil
@@ -37,7 +37,7 @@ public struct SavedPlaybackState: Codable, Sendable {
     public let positionSeconds: Double
     public let durationSeconds: Double
     public let savedAt: Date
-    
+
     public init(track: Track, queue: [Track], positionSeconds: Double, durationSeconds: Double = 0, savedAt: Date = Date()) {
         self.track = track
         self.queue = queue
@@ -59,9 +59,9 @@ public enum PlaybackSlideDirection: String, Sendable, Equatable {
 @MainActor
 public final class PlaybackProgressTracker: ObservableObject {
     public static let shared = PlaybackProgressTracker()
-    
+
     @Published public var currentTime: Double = 0
-    
+
     public init() {}
 }
 
@@ -70,11 +70,11 @@ public final class PlaybackProgressTracker: ObservableObject {
 @MainActor
 public final class AudioPlayerEngine: ObservableObject {
     public static let shared = AudioPlayerEngine()
-    
+
     public static let savedVolumeKey = "sonorist_saved_volume"
     public static let savedPlaybackStateKey = "sonorist_saved_playback_state"
     public static let trackDidCacheNotification = Notification.Name("SonoristTrackDidCacheNotification")
-    
+
     // Playback state
     @Published public var currentTrack: Track?
     @Published public var isPlaying: Bool = false
@@ -84,12 +84,12 @@ public final class AudioPlayerEngine: ObservableObject {
         set { PlaybackProgressTracker.shared.currentTime = newValue }
     }
     @Published public var duration: Double = 0
-    
+
     // Volume state & pre-mute retention
     public var preMuteVolume: Float = 0.8
     public var isFadingForSleepTimer: Bool = false
     private var lastSavedPosition: Double = 0.0
-    
+
     @Published public var volume: Float = 0.8 {
         didSet {
             player?.volume = volume
@@ -105,7 +105,7 @@ public final class AudioPlayerEngine: ObservableObject {
         case off
         case all
         case one
-        
+
         public var title: String {
             switch self {
             case .off: return "Repeat Off"
@@ -113,7 +113,7 @@ public final class AudioPlayerEngine: ObservableObject {
             case .one: return "Repeat One"
             }
         }
-        
+
         public var systemImage: String {
             switch self {
             case .off, .all: return "repeat"
@@ -121,21 +121,21 @@ public final class AudioPlayerEngine: ObservableObject {
             }
         }
     }
-    
+
     @Published public var queue: [Track] = []
     @Published public var isShuffle: Bool = false
     @Published public var repeatMode: RepeatMode = .off
     @Published public var isAutoplayEnabled: Bool = true
     @Published public var isPlayingFromOfflineLibrary: Bool = false
     @Published public var errorMessage: String?
-    
+
     public var isRepeat: Bool {
         get { repeatMode != .off }
         set { repeatMode = newValue ? .all : .off }
     }
-    
+
     private var unShuffledQueue: [Track] = []
-    
+
     public func toggleRepeatMode() {
         switch repeatMode {
         case .off:
@@ -146,11 +146,11 @@ public final class AudioPlayerEngine: ObservableObject {
             repeatMode = .off
         }
     }
-    
+
     public func toggleShuffle() {
         isShuffle.toggle()
         guard !queue.isEmpty else { return }
-        
+
         if isShuffle {
             unShuffledQueue = queue
             if let current = currentTrack, let currentIdx = queue.firstIndex(where: { $0.id == current.id }) {
@@ -176,9 +176,9 @@ public final class AudioPlayerEngine: ObservableObject {
             }
         }
     }
-    
+
     public static let savedImmersiveKey = "SonoristIsImmersiveActive"
-    
+
     // UI View Modes (Apple Music Immersive & MiniPlayer)
     @Published public var isImmersiveViewActive: Bool = false {
         didSet {
@@ -186,7 +186,7 @@ public final class AudioPlayerEngine: ObservableObject {
         }
     }
     @Published public var isMiniPlayerActive: Bool = false
-    
+
     // Synced Lyrics (LRCLIB Integration)
     @Published public var lyricLines: [LyricLine] = []
     @Published public var activeLyricIndex: Int = 0
@@ -195,7 +195,7 @@ public final class AudioPlayerEngine: ObservableObject {
     @Published public var lyricLeadTime: Double = 0.35 // 350ms lead time compensation (Apple Music / Karaoke standard)
     @Published public var userLyricOffset: Double = 0.0 // User fine-tuning per-track in seconds (-5.0s to +5.0s)
     @Published public var showSyncCalibrationPopover: Bool = false
-    
+
     // Advanced Lyrics & Music DNA features (Echo-Music / Apple Music standard)
     @Published public var showTranslation: Bool = false
     @Published public var showRomanization: Bool = false
@@ -205,36 +205,36 @@ public final class AudioPlayerEngine: ObservableObject {
     @Published public var isTranslatingLyrics: Bool = false
     @Published public var activeWordIndex: Int = -1
     @Published public var targetTranslationLanguage: String = "en"
-    
+
     // Sleep Timer
     @Published public var sleepTimerOption: SleepTimerOption = .off
     @Published public var sleepTimerRemainingSeconds: Int = 0
     private var sleepTimerTask: Task<Void, Never>?
     private var preFadeVolume: Float = 0.8
-    
+
     // Scrubber UI state
     @Published public var isDraggingScrubber: Bool = false
     @Published public var dragScrubTime: Double = 0
-    
+
     // Extra Options & User Features
     @Published public var likedTracks: [Track] = []
     @Published public var playHistory: [Track] = []
     @Published public var downloadingTrackIDs: Set<String> = []
     @Published public var downloadProgress: [String: Double] = [:]
-    
+
     // Audio Stream Quality Selection
     @Published public var selectedAudioQuality: AudioQuality = .standard
     @Published public var availableStreamOptions: [AudioStreamOption] = []
-    
+
     // Audio Settings & Equalizer
     @Published public var equalizerPreset: String = "Flat"
     @Published public var isEqualizerEnabled: Bool = true
     @Published public var equalizerPreamp: Double = 0.0 // -12dB to +12dB
     @Published public var equalizerBands: [Double] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] // 10 bands: 32Hz, 64Hz, 125Hz, 250Hz, 500Hz, 1kHz, 2kHz, 4kHz, 8kHz, 16kHz
-    
+
     public static let savedCrossfadeEnabledKey = "sonorist_saved_crossfade_enabled"
     public static let savedCrossfadeDurationKey = "sonorist_saved_crossfade_duration"
-    
+
     @Published public var audioQualitySetting: String = "AAC 128kbps (Lossless Container)"
     @Published public var isAudioNormalized: Bool = true
     @Published public var isCrossfadeEnabled: Bool = true {
@@ -252,13 +252,13 @@ public final class AudioPlayerEngine: ObservableObject {
     @Published public var outgoingTrack: Track? = nil
     @Published public var incomingTrack: Track? = nil
     @Published public var slideDirection: PlaybackSlideDirection = .forward
-    
+
     // Panels & Modals
     @Published public var showQueueSheet: Bool = false
     @Published public var showLyricsSheet: Bool = false
     @Published public var showEqualizerSheet: Bool = false
     @Published public var showSettingsSheet: Bool = false
-    
+
     public static let equalizerPresets: [String: [Double]] = [
         "Flat": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         "Acoustic": [4.5, 4.0, 2.5, 1.0, 1.5, 1.5, 3.0, 3.5, 3.0, 2.0],
@@ -272,29 +272,30 @@ public final class AudioPlayerEngine: ObservableObject {
         "Rock": [5.0, 3.5, -1.5, -3.0, -1.0, 1.0, 3.5, 4.5, 4.5, 4.5],
         "Vocal Booster": [-1.0, -1.0, 0, 2.0, 4.0, 4.5, 3.5, 2.0, 0.5, -1.0]
     ]
-    
+
     public func applyPreset(_ name: String) {
         self.equalizerPreset = name
         if let values = Self.equalizerPresets[name] {
             self.equalizerBands = values
         }
     }
-    
+
     public func setEqualizerPreset(_ name: String) {
         applyPreset(name)
     }
-    
+
     public func setBand(index: Int, value: Double) {
         guard index >= 0 && index < equalizerBands.count else { return }
         equalizerBands[index] = max(-12.0, min(12.0, value))
         equalizerPreset = "Custom"
     }
-    
+
     public func setEqualizerBand(index: Int, value: Double) {
         setBand(index: index, value: value)
     }
-    
+
     private var player: AVPlayer?
+    private var pendingHandoffPlayer: AVPlayer?
     private var timeObserverPlayer: AVPlayer?
     private var timeObserverToken: Any?
     private let cacheManager = MediaCacheManager.shared
@@ -302,7 +303,7 @@ public final class AudioPlayerEngine: ObservableObject {
     private var playerItemCancellables = Set<AnyCancellable>()
     private var nowPlayingInfo: [String: Any] = [:]
     private var isRemoteCommandsConfigured: Bool = false
-    
+
     private func removeCurrentTimeObserver() {
         if let token = timeObserverToken, let observingPlayer = timeObserverPlayer {
             observingPlayer.removeTimeObserver(token)
@@ -310,14 +311,14 @@ public final class AudioPlayerEngine: ObservableObject {
         timeObserverToken = nil
         timeObserverPlayer = nil
     }
-    
+
     // Intentional Listening Gate State
     public var continuousListeningSeconds: Double = 0.0
     public var hasAutoSavedCurrentTrack: Bool = false
     private var currentStreamRemoteURL: URL? = nil
     private var autoSaveTask: Task<Void, Never>? = nil
     private var stallRecoveryTask: Task<Void, Never>? = nil
-    
+
     // Dual-Player Seamless Crossfade State
     private var outgoingPlayer: AVPlayer?
     private var isTransitioningCrossfade: Bool = false
@@ -327,7 +328,7 @@ public final class AudioPlayerEngine: ObservableObject {
     private var crossfadeTransitionTask: Task<Void, Never>? = nil
     private var manualCrossfadeResolveTask: Task<Void, Never>? = nil
     private var trackLoadingTask: Task<Void, Never>? = nil
-    
+
     public init() {
         // 1. Restore persistent volume level across app launches
         if UserDefaults.standard.object(forKey: Self.savedVolumeKey) != nil {
@@ -337,10 +338,10 @@ public final class AudioPlayerEngine: ObservableObject {
                 self.preMuteVolume = savedVol
             }
         }
-        
+
         loadLikedTracks()
         restoreSavedPlaybackState()
-        
+
         if UserDefaults.standard.object(forKey: Self.savedCrossfadeEnabledKey) != nil {
             self.isCrossfadeEnabled = UserDefaults.standard.bool(forKey: Self.savedCrossfadeEnabledKey)
         }
@@ -350,18 +351,18 @@ public final class AudioPlayerEngine: ObservableObject {
                 self.crossfadeDuration = savedDur
             }
         }
-        
+
         setupAppLifecycleObservers()
     }
-    
+
     deinit {
         if let token = timeObserverToken, let observingPlayer = timeObserverPlayer {
             observingPlayer.removeTimeObserver(token)
         }
     }
-    
+
     // MARK: - Audio Session Management
-    
+
     public func assertAudioSession() {
         #if os(iOS)
         DispatchQueue.global(qos: .userInitiated).async {
@@ -379,9 +380,9 @@ public final class AudioPlayerEngine: ObservableObject {
         }
         #endif
     }
-    
+
     // MARK: - App Lifecycle Observers & State Persistence
-    
+
     private func setupAppLifecycleObservers() {
         #if os(macOS)
         NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)
@@ -390,7 +391,7 @@ public final class AudioPlayerEngine: ObservableObject {
                 self?.saveCurrentPlaybackState()
             }
             .store(in: &cancellables)
-            
+
         NotificationCenter.default.publisher(for: NSApplication.willResignActiveNotification)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
@@ -404,14 +405,14 @@ public final class AudioPlayerEngine: ObservableObject {
                 self?.saveCurrentPlaybackState()
             }
             .store(in: &cancellables)
-            
+
         NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.saveCurrentPlaybackState()
             }
             .store(in: &cancellables)
-            
+
         NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
@@ -435,7 +436,7 @@ public final class AudioPlayerEngine: ObservableObject {
                 }
             }
             .store(in: &cancellables)
-            
+
         NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)
             .receive(on: DispatchQueue.main)
             .sink { _ in
@@ -444,7 +445,7 @@ public final class AudioPlayerEngine: ObservableObject {
             .store(in: &cancellables)
         #endif
     }
-    
+
     /// Persists current track, position head, and queue to disk
     public func saveCurrentPlaybackState() {
         guard let track = currentTrack else { return }
@@ -458,7 +459,7 @@ public final class AudioPlayerEngine: ObservableObject {
             UserDefaults.standard.set(data, forKey: Self.savedPlaybackStateKey)
         }
     }
-    
+
     /// Restores last played track, queue, and playback head timestamp
     public func restoreSavedPlaybackState() {
         guard let data = UserDefaults.standard.data(forKey: Self.savedPlaybackStateKey),
@@ -466,7 +467,7 @@ public final class AudioPlayerEngine: ObservableObject {
               !state.track.id.isEmpty else {
             return
         }
-        
+
         self.currentTrack = state.track
         self.queue = state.queue
         self.currentTime = state.positionSeconds
@@ -474,7 +475,7 @@ public final class AudioPlayerEngine: ObservableObject {
         self.duration = state.durationSeconds > 0 ? state.durationSeconds : state.track.durationSeconds
         self.isPlaying = false
         self.isBuffering = false
-        
+
         // NOTE: We intentionally do NOT call updateNowPlaying / updateNowPlayingPlaybackTime here.
         // Restoring state on cold launch fires before AVAudioSession is active and before
         // setupRemoteCommands() has run. Writing playbackRate=0 + playbackState=paused into
@@ -482,28 +483,28 @@ public final class AudioPlayerEngine: ObservableObject {
         // and suppresses the Dynamic Island transport buttons when the user later plays a track.
         // Now Playing info is written by updateNowPlaying() inside startPlayer() once the
         // audio session is active and AVPlayer is ready to play.
-        
+
         // Restore Immersive Now Playing mode if user was in Now Playing view
         if UserDefaults.standard.object(forKey: Self.savedImmersiveKey) != nil {
             self.isImmersiveViewActive = UserDefaults.standard.bool(forKey: Self.savedImmersiveKey)
         }
-        
+
         // Pre-fetch lyrics in background
         Task { [weak self] in
             guard let self = self else { return }
             await self.loadLyrics(for: state.track)
         }
-        
+
         // Prepare AVPlayer in paused state at restored position
         self.prepareRestoredTrack(track: state.track, seekTo: state.positionSeconds)
     }
-    
+
     private func prepareRestoredTrack(track: Track, seekTo: Double) {
         Task {
             do {
                 let streamURL: URL
                 let formatBadge: String
-                
+
                 if track.id.hasPrefix("local_"), let localURL = track.streamURL, localURL.isFileURL {
                     streamURL = localURL
                     formatBadge = track.audioFormat
@@ -520,14 +521,14 @@ public final class AudioPlayerEngine: ObservableObject {
                     self.availableStreamOptions = options
                     self.currentStreamRemoteURL = resolvedURL
                 }
-                
+
                 var updatedTrack = track
                 updatedTrack.streamURL = streamURL
                 updatedTrack.audioFormat = formatBadge
                 updatedTrack.isCached = cacheManager.isCached(videoId: track.id)
                 updatedTrack.isLiked = isLiked(track: track)
                 self.currentTrack = updatedTrack
-                
+
                 self.startPlayer(with: streamURL, track: updatedTrack, autoPlay: false, seekTo: seekTo)
             } catch {
                 #if DEBUG
@@ -536,9 +537,9 @@ public final class AudioPlayerEngine: ObservableObject {
             }
         }
     }
-    
+
     // MARK: - Playback Controls
-    
+
     /// Loads and plays a track, resolving stream URLs dynamically
     public func play(track: Track, autoPlay: Bool = true, seekTo: Double? = nil) {
         cancelCrossfade()
@@ -548,20 +549,17 @@ public final class AudioPlayerEngine: ObservableObject {
                 self.slideDirection = (newIdx >= curIdx) ? .forward : .backward
             }
         }
-        
-        // Gracefully fade out outgoing player if playing to avoid abrupt clicks/pops
-        if let oldPlayer = self.player, self.isPlaying {
-            let curVol = oldPlayer.volume
-            Task { @MainActor in
-                let steps = 4
-                for s in 1...steps {
-                    try? await Task.sleep(nanoseconds: 20_000_000)
-                    oldPlayer.volume = max(0, curVol * Float(steps - s) / Float(steps))
-                }
-                oldPlayer.pause()
-            }
+
+        // Keep currently playing song running seamlessly until incoming track is ready
+        if autoPlay, let oldPlayer = self.player, self.isPlaying {
+            self.pendingHandoffPlayer?.pause()
+            self.pendingHandoffPlayer = oldPlayer
+        } else {
+            self.pendingHandoffPlayer?.pause()
+            self.pendingHandoffPlayer = nil
+            self.player?.pause()
         }
-        
+
         self.currentTrack = track
         self.isBuffering = true
         self.errorMessage = nil
@@ -572,27 +570,27 @@ public final class AudioPlayerEngine: ObservableObject {
             self.currentTime = 0
             self.lastSavedPosition = 0
         }
-        
+
         // Reset Intentional Listening Filter
         self.continuousListeningSeconds = 0.0
         self.hasAutoSavedCurrentTrack = cacheManager.isCached(videoId: track.id)
         self.currentStreamRemoteURL = nil
         self.autoSaveTask?.cancel()
-        
+
         // Add to history
         if !playHistory.contains(where: { $0.id == track.id }) {
             playHistory.insert(track, at: 0)
         }
-        
+
         // Ensure queue contains track for next/prev remote controls
         if !queue.contains(where: { $0.id == track.id }) {
             queue.insert(track, at: 0)
         }
-        
+
         // Record into Listening Analytics
         let isCached = MediaCacheManager.shared.isCached(videoId: track.id)
         ListeningAnalyticsManager.shared.recordTrackStart(track: track, quality: selectedAudioQuality, isCached: isCached)
-        
+
         let requestedTrackId = track.id
         trackLoadingTask?.cancel()
         trackLoadingTask = Task { @MainActor [weak self] in
@@ -600,7 +598,7 @@ public final class AudioPlayerEngine: ObservableObject {
             do {
                 let streamURL: URL
                 let formatBadge: String
-                
+
                 // 1. Check local audio file imported from user disk (prefixed with local_)
                 if track.id.hasPrefix("local_"), let localURL = track.streamURL, localURL.isFileURL {
                     streamURL = localURL
@@ -630,10 +628,10 @@ public final class AudioPlayerEngine: ObservableObject {
                     self.availableStreamOptions = options
                     self.currentStreamRemoteURL = resolvedURL
                 }
-                
+
                 // Race condition guard: verify this track is still current and task wasn't cancelled
                 guard !Task.isCancelled, self.currentTrack?.id == requestedTrackId else { return }
-                
+
                 var updatedTrack = track
                 updatedTrack.streamURL = streamURL
                 updatedTrack.audioFormat = formatBadge
@@ -645,12 +643,12 @@ public final class AudioPlayerEngine: ObservableObject {
                 self.currentTrack = updatedTrack
                 self.lyricLines = []
                 self.activeLyricIndex = 0
-                
+
                 self.startPlayer(with: streamURL, track: updatedTrack, autoPlay: autoPlay, seekTo: seekTo)
-                
+
                 // Fetch synced lyrics in background
                 await self.loadLyrics(for: updatedTrack)
-                
+
                 self.saveCurrentPlaybackState()
             } catch {
                 guard !Task.isCancelled, self.currentTrack?.id == requestedTrackId else { return }
@@ -662,7 +660,7 @@ public final class AudioPlayerEngine: ObservableObject {
             }
         }
     }
-    
+
     /// Switches the audio stream quality seamlessly during active playback
     public func switchQuality(to quality: AudioQuality) {
         FluidHaptics.tap()
@@ -670,7 +668,7 @@ public final class AudioPlayerEngine: ObservableObject {
         self.selectedAudioQuality = quality
         let savedTime = self.currentTime
         let wasPlaying = self.isPlaying
-        
+
         Task {
             do {
                 let (streamURL, formatBadge, options) = try await InnerTubeClient.shared.resolveStreamURL(for: track.id, preferredQuality: quality)
@@ -679,7 +677,7 @@ public final class AudioPlayerEngine: ObservableObject {
                 updated.audioFormat = formatBadge
                 self.currentTrack = updated
                 self.availableStreamOptions = options
-                
+
                 self.startPlayer(with: streamURL, track: updated, autoPlay: wasPlaying, seekTo: savedTime)
             } catch {
                 #if DEBUG
@@ -688,9 +686,9 @@ public final class AudioPlayerEngine: ObservableObject {
             }
         }
     }
-    
+
     // MARK: - Dual-Player Apple Music Crossfade Engine
-    
+
     public func cancelCrossfade() {
         crossfadeTransitionTask?.cancel()
         crossfadeTransitionTask = nil
@@ -702,6 +700,8 @@ public final class AudioPlayerEngine: ObservableObject {
         outgoingPlayer = nil
         preloadedPlayer?.pause()
         preloadedPlayer = nil
+        pendingHandoffPlayer?.pause()
+        pendingHandoffPlayer = nil
         preloadedTrack = nil
         outgoingTrack = nil
         incomingTrack = nil
@@ -709,7 +709,7 @@ public final class AudioPlayerEngine: ObservableObject {
         isTransitioningCrossfade = false
         isCrossfading = false
     }
-    
+
     public func getNextTrackInQueue() -> Track? {
         guard !queue.isEmpty, let current = currentTrack,
               let currentIndex = queue.firstIndex(where: { $0.id == current.id }) else {
@@ -722,7 +722,7 @@ public final class AudioPlayerEngine: ObservableObject {
         }
         return nil
     }
-    
+
     public func getPreviousTrackInQueue() -> Track? {
         guard !queue.isEmpty, let current = currentTrack,
               let currentIndex = queue.firstIndex(where: { $0.id == current.id }) else {
@@ -735,16 +735,16 @@ public final class AudioPlayerEngine: ObservableObject {
         }
         return nil
     }
-    
+
     private func preloadNextTrackIfNeeded() {
         guard isCrossfadeEnabled && crossfadeDuration > 0 && repeatMode != .one else { return }
         guard preloadTask == nil && preloadedPlayer == nil else { return }
         guard let nextTrack = getNextTrackInQueue() else { return }
-        
+
         preloadTask = Task { @MainActor [weak self] in
             guard let self = self else { return }
             defer { self.preloadTask = nil }
-            
+
             do {
                 let streamURL: URL
                 var updatedNext = nextTrack
@@ -764,9 +764,9 @@ public final class AudioPlayerEngine: ObservableObject {
                     streamURL = resolvedURL
                     updatedNext.audioFormat = badge
                 }
-                
+
                 if Task.isCancelled { return }
-                
+
                 let asset: AVURLAsset
                 if streamURL.isFileURL {
                     asset = AVURLAsset(url: streamURL)
@@ -780,13 +780,13 @@ public final class AudioPlayerEngine: ObservableObject {
                         ]
                     )
                 }
-                
+
                 let playerItem = AVPlayerItem(asset: asset)
                 playerItem.preferredForwardBufferDuration = 60.0
                 #if os(iOS)
                 playerItem.canUseNetworkResourcesForLiveStreamingWhilePaused = true
                 #endif
-                
+
                 let prePlayer = AVPlayer(playerItem: playerItem)
                 prePlayer.automaticallyWaitsToMinimizeStalling = true
                 prePlayer.volume = 0.0
@@ -794,10 +794,10 @@ public final class AudioPlayerEngine: ObservableObject {
                 prePlayer.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
                 prePlayer.preventsDisplaySleepDuringVideoPlayback = false
                 #endif
-                
+
                 self.preloadedPlayer = prePlayer
                 self.preloadedTrack = updatedNext
-                
+
                 // If the track reached the crossfade threshold while resolving, transition immediately!
                 let remaining = self.duration - self.currentTime
                 if remaining <= self.crossfadeDuration && remaining > 0 && !self.isTransitioningCrossfade && self.isPlaying {
@@ -810,17 +810,17 @@ public final class AudioPlayerEngine: ObservableObject {
             }
         }
     }
-    
+
     private func performCrossfadeTransitionIfNeeded() {
         guard isCrossfadeEnabled && crossfadeDuration > 0 && repeatMode != .one else { return }
         guard !isTransitioningCrossfade, isPlaying, duration > (crossfadeDuration + 1.0) else { return }
         guard let nextTrack = preloadedTrack ?? getNextTrackInQueue() else { return }
-        
+
         // If preload is still resolving in background, let it finish and trigger transition
         if preloadedPlayer == nil && preloadTask != nil {
             return
         }
-        
+
         if preloadedPlayer == nil {
             // Trigger preload if not yet active
             preloadNextTrackIfNeeded()
@@ -829,20 +829,20 @@ public final class AudioPlayerEngine: ObservableObject {
                 return
             }
         }
-        
+
         isTransitioningCrossfade = true
         isCrossfading = true
         self.slideDirection = .forward
-        
+
         preloadTask?.cancel()
         preloadTask = nil
-        
+
         let oldPlayer = self.player
         self.outgoingPlayer = oldPlayer
-        
+
         let incomingTrack = (preloadedTrack?.id == nextTrack.id) ? (preloadedTrack ?? nextTrack) : nextTrack
         let incomingPlayer: AVPlayer
-        
+
         if let prep = self.preloadedPlayer, self.preloadedTrack?.id == incomingTrack.id {
             incomingPlayer = prep
             self.preloadedPlayer = nil
@@ -855,13 +855,13 @@ public final class AudioPlayerEngine: ObservableObject {
             self.play(track: incomingTrack)
             return
         }
-        
+
         incomingPlayer.volume = 0.0
         #if os(iOS)
         assertAudioSession()
         #endif
         incomingPlayer.play()
-        
+
         let outgoing = self.currentTrack
         self.outgoingTrack = outgoing
         self.incomingTrack = incomingTrack
@@ -871,47 +871,47 @@ public final class AudioPlayerEngine: ObservableObject {
         self.currentTime = 0.0
         self.isPlaying = true
         self.isBuffering = false
-        
+
         if let currentItem = incomingPlayer.currentItem {
             setupPlayerObservers(for: incomingPlayer, playerItem: currentItem, track: incomingTrack, autoPlay: true, isCrossfadeIncoming: true)
         }
-        
+
         Task { [weak self] in
             await self?.loadLyrics(for: incomingTrack)
         }
         self.updateNowPlaying(track: incomingTrack)
         self.saveCurrentPlaybackState()
-        
+
         let durationSecs = max(1.0, self.crossfadeDuration)
         let stepIntervalMs: UInt64 = 30
         let totalSteps = max(1, Int((durationSecs * 1000.0) / Double(stepIntervalMs)))
-        
+
         crossfadeTransitionTask?.cancel()
         crossfadeTransitionTask = Task { @MainActor [weak self] in
             guard let self = self else { return }
-            
+
             for step in 1...totalSteps {
                 try? await Task.sleep(nanoseconds: stepIntervalMs * 1_000_000)
                 if Task.isCancelled { break }
-                
+
                 let progress = Double(step) / Double(totalSteps) // 0.0 -> 1.0
                 self.crossfadeProgress = progress
-                
+
                 // Crossfade title & artist metadata smoothly at 50% midpoint
                 if progress >= 0.5 && self.currentTrack?.id != incomingTrack.id {
                     self.currentTrack = incomingTrack
                 }
-                
+
                 // Equal-Power Crossfade: cos(θ) & sin(θ) maintains constant acoustic power
                 let angle = progress * (Double.pi / 2.0)
                 let outGain = Float(cos(angle))
                 let inGain = Float(sin(angle))
-                
+
                 let currentMaster = self.volume
                 oldPlayer?.volume = max(0.0, min(currentMaster, currentMaster * outGain))
                 incomingPlayer.volume = max(0.0, min(currentMaster, currentMaster * inGain))
             }
-            
+
             oldPlayer?.pause()
             if self.outgoingPlayer === oldPlayer {
                 self.outgoingPlayer = nil
@@ -928,7 +928,7 @@ public final class AudioPlayerEngine: ObservableObject {
             self.incomingTrack = nil
         }
     }
-    
+
     /// Crossfades from current playing track to target track (used for manual next/previous or swiping)
     public func crossfadeTo(track targetTrack: Track, direction: PlaybackSlideDirection, duration: Double = 2.0) {
         guard isCrossfadeEnabled && crossfadeDuration > 0,
@@ -938,9 +938,9 @@ public final class AudioPlayerEngine: ObservableObject {
             self.play(track: targetTrack)
             return
         }
-        
+
         cancelCrossfade()
-        
+
         let oldPlayer = self.player
         self.outgoingPlayer = oldPlayer
         self.outgoingTrack = outgoing
@@ -949,11 +949,11 @@ public final class AudioPlayerEngine: ObservableObject {
         self.isTransitioningCrossfade = true
         self.isCrossfading = true
         self.crossfadeProgress = 0.0
-        
+
         manualCrossfadeResolveTask?.cancel()
         manualCrossfadeResolveTask = Task { @MainActor [weak self] in
             guard let self = self else { return }
-            
+
             do {
                 let streamURL: URL
                 var updatedTarget = targetTrack
@@ -971,16 +971,16 @@ public final class AudioPlayerEngine: ObservableObject {
                     streamURL = resolvedURL
                     updatedTarget.audioFormat = badge
                 }
-                
+
                 guard self.isCrossfading, self.incomingTrack?.id == targetTrack.id else { return }
-                
+
                 let asset: AVURLAsset = streamURL.isFileURL ? AVURLAsset(url: streamURL) : AVURLAsset(url: streamURL, options: ["AVURLAssetHTTPHeaderFieldsKey": ["User-Agent": "com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip"]])
                 let playerItem = AVPlayerItem(asset: asset)
                 playerItem.preferredForwardBufferDuration = 60.0
                 #if os(iOS)
                 playerItem.canUseNetworkResourcesForLiveStreamingWhilePaused = true
                 #endif
-                
+
                 let incomingPlayer = AVPlayer(playerItem: playerItem)
                 incomingPlayer.automaticallyWaitsToMinimizeStalling = true
                 incomingPlayer.volume = 0.0
@@ -990,46 +990,46 @@ public final class AudioPlayerEngine: ObservableObject {
                 incomingPlayer.preventsDisplaySleepDuringVideoPlayback = false
                 #endif
                 incomingPlayer.play()
-                
+
                 self.player = incomingPlayer
                 if let currentItem = incomingPlayer.currentItem {
                     self.setupPlayerObservers(for: incomingPlayer, playerItem: currentItem, track: updatedTarget, autoPlay: true, isCrossfadeIncoming: true)
                 }
-                
+
                 Task { [weak self] in
                     await self?.loadLyrics(for: updatedTarget)
                 }
                 self.updateNowPlaying(track: updatedTarget)
-                
+
                 let durationSecs = min(2.5, max(1.0, self.crossfadeDuration))
                 let stepIntervalMs: UInt64 = 30
                 let totalSteps = max(1, Int((durationSecs * 1000.0) / Double(stepIntervalMs)))
-                
+
                 self.crossfadeTransitionTask?.cancel()
                 self.crossfadeTransitionTask = Task { @MainActor [weak self] in
                     guard let self = self else { return }
-                    
+
                     for step in 1...totalSteps {
                         try? await Task.sleep(nanoseconds: stepIntervalMs * 1_000_000)
                         if Task.isCancelled { break }
-                        
+
                         let progress = Double(step) / Double(totalSteps)
                         self.crossfadeProgress = progress
-                        
+
                         // Crossfade metadata title & artist at 50% midpoint
                         if progress >= 0.5 && self.currentTrack?.id != updatedTarget.id {
                             self.currentTrack = updatedTarget
                         }
-                        
+
                         let angle = progress * (Double.pi / 2.0)
                         let outGain = Float(cos(angle))
                         let inGain = Float(sin(angle))
-                        
+
                         let currentMaster = self.volume
                         oldPlayer?.volume = max(0.0, min(currentMaster, currentMaster * outGain))
                         incomingPlayer.volume = max(0.0, min(currentMaster, currentMaster * inGain))
                     }
-                    
+
                     oldPlayer?.pause()
                     if self.outgoingPlayer === oldPlayer {
                         self.outgoingPlayer = nil
@@ -1054,13 +1054,13 @@ public final class AudioPlayerEngine: ObservableObject {
             }
         }
     }
-    
+
     private func startPlayer(with url: URL, track: Track, autoPlay: Bool = true, seekTo: Double? = nil) {
         cancelCrossfade()
         removeCurrentTimeObserver()
         playerItemCancellables.removeAll()
         stallRecoveryTask?.cancel()
-        
+
         let asset: AVURLAsset
         if url.isFileURL {
             asset = AVURLAsset(url: url)
@@ -1074,14 +1074,14 @@ public final class AudioPlayerEngine: ObservableObject {
                 ]
             )
         }
-        
+
         let playerItem = AVPlayerItem(asset: asset)
         // Aggressively buffer up to 60 seconds of forward audio to prevent cellular drops or rate limits
         playerItem.preferredForwardBufferDuration = 60.0
         #if os(iOS)
         playerItem.canUseNetworkResourcesForLiveStreamingWhilePaused = true
         #endif
-        
+
         let newPlayer = AVPlayer(playerItem: playerItem)
         newPlayer.automaticallyWaitsToMinimizeStalling = true
         newPlayer.volume = volume
@@ -1090,14 +1090,14 @@ public final class AudioPlayerEngine: ObservableObject {
         newPlayer.preventsDisplaySleepDuringVideoPlayback = false
         #endif
         self.player = newPlayer
-        
+
         setupPlayerObservers(for: newPlayer, playerItem: playerItem, track: track, autoPlay: autoPlay, seekTo: seekTo, isCrossfadeIncoming: false)
     }
-    
+
     private func setupPlayerObservers(for newPlayer: AVPlayer, playerItem: AVPlayerItem, track: Track, autoPlay: Bool = true, seekTo: Double? = nil, isCrossfadeIncoming: Bool = false) {
         removeCurrentTimeObserver()
         playerItemCancellables.removeAll()
-        
+
         // 1. Observe status & initial ready-to-play
         playerItem.publisher(for: \.status)
             .receive(on: DispatchQueue.main)
@@ -1120,7 +1120,20 @@ public final class AudioPlayerEngine: ObservableObject {
                         newPlayer.play()
                         self.isPlaying = true
                         self.updateNowPlaying(track: track)
-                        
+
+                        // Seamless handoff: fade out the previous playing track now that the new track has begun
+                        if let handoff = self.pendingHandoffPlayer {
+                            self.pendingHandoffPlayer = nil
+                            let curVol = handoff.volume
+                            Task { @MainActor in
+                                for s in 1...4 {
+                                    try? await Task.sleep(nanoseconds: 25_000_000)
+                                    handoff.volume = max(0, curVol * Float(4 - s) / 4.0)
+                                }
+                                handoff.pause()
+                            }
+                        }
+
                         if !isCrossfadeIncoming {
                             if self.isCrossfadeEnabled && self.crossfadeDuration > 0 && !self.isFadingForSleepTimer {
                                 newPlayer.volume = 0.0
@@ -1148,7 +1161,7 @@ public final class AudioPlayerEngine: ObservableObject {
                     let desc = playerItem.error?.localizedDescription ?? "Stream failed to load."
                     self.isBuffering = false
                     self.isPlaying = false
-                    
+
                     // Self-healing fallback: If offline file failed to open, try falling back to online stream
                     if let asset = playerItem.asset as? AVURLAsset, asset.url.isFileURL && !track.id.hasPrefix("local_") {
                         #if DEBUG
@@ -1176,7 +1189,7 @@ public final class AudioPlayerEngine: ObservableObject {
                 }
             }
             .store(in: &playerItemCancellables)
-        
+
         // 2. Observe buffer depletion & recovery
         playerItem.publisher(for: \.isPlaybackBufferEmpty)
             .receive(on: DispatchQueue.main)
@@ -1187,7 +1200,7 @@ public final class AudioPlayerEngine: ObservableObject {
                 }
             }
             .store(in: &playerItemCancellables)
-        
+
         playerItem.publisher(for: \.isPlaybackLikelyToKeepUp)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] likely in
@@ -1200,7 +1213,7 @@ public final class AudioPlayerEngine: ObservableObject {
                 }
             }
             .store(in: &playerItemCancellables)
-        
+
         // 3. Observe playback stalling & trigger automatic smart stream recovery
         NotificationCenter.default.publisher(for: .AVPlayerItemPlaybackStalled, object: playerItem)
             .receive(on: DispatchQueue.main)
@@ -1213,7 +1226,7 @@ public final class AudioPlayerEngine: ObservableObject {
                 self.recoverFromStall()
             }
             .store(in: &playerItemCancellables)
-        
+
         // 4. Observe item failure mid-stream (e.g. YouTube CDN severed connection)
         NotificationCenter.default.publisher(for: .AVPlayerItemFailedToPlayToEndTime, object: playerItem)
             .receive(on: DispatchQueue.main)
@@ -1226,7 +1239,7 @@ public final class AudioPlayerEngine: ObservableObject {
                 self.recoverFromStall(forceStreamRefresh: true)
             }
             .store(in: &playerItemCancellables)
-        
+
         // 5. Observe player timeControlStatus for accurate buffering indicator
         newPlayer.publisher(for: \.timeControlStatus)
             .receive(on: DispatchQueue.main)
@@ -1246,7 +1259,7 @@ public final class AudioPlayerEngine: ObservableObject {
                 }
             }
             .store(in: &playerItemCancellables)
-        
+
         // Periodic time observer for smooth UI scrubbing & lyric line synchronization (250ms interval)
         removeCurrentTimeObserver()
         let interval = CMTime(seconds: 0.25, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
@@ -1254,12 +1267,12 @@ public final class AudioPlayerEngine: ObservableObject {
             guard let self = self else { return }
             let secs = time.seconds
             guard secs.isFinite && !secs.isNaN && secs >= 0 else { return }
-            
+
             if !self.isDraggingScrubber {
                 self.currentTime = secs
                 if self.isPlaying {
                     ListeningAnalyticsManager.shared.recordListeningTime(seconds: 0.25, track: self.currentTrack)
-                    
+
                     // Intentional Listening 15-second skip filter:
                     if !self.hasAutoSavedCurrentTrack && self.currentTrack != nil {
                         self.continuousListeningSeconds += 0.25
@@ -1267,13 +1280,13 @@ public final class AudioPlayerEngine: ObservableObject {
                             self.triggerAutoSaveForCurrentTrack()
                         }
                     }
-                    
+
                     // Throttled periodic save of playback position every ~2 seconds
                     if abs(self.currentTime - self.lastSavedPosition) >= 2.0 {
                         self.lastSavedPosition = self.currentTime
                         self.saveCurrentPlaybackState()
                     }
-                    
+
                     // Seamless Dual-Player Apple Music Crossfade
                     if self.isCrossfadeEnabled && self.crossfadeDuration > 0 && self.repeatMode != .one && self.duration > (self.crossfadeDuration + 1.0) && !self.isFadingForSleepTimer && !self.isTransitioningCrossfade {
                         let remaining = self.duration - secs
@@ -1285,7 +1298,7 @@ public final class AudioPlayerEngine: ObservableObject {
                     }
                 }
             }
-            
+
             // Real-time synced lyric line detection with natural lead time & user offset (Only if truly synced)
             if self.isLyricsSynced && !self.lyricLines.isEmpty {
                 let syncTime = self.currentTime + self.lyricLeadTime + self.userLyricOffset
@@ -1300,7 +1313,7 @@ public final class AudioPlayerEngine: ObservableObject {
                 if self.activeLyricIndex != best {
                     self.activeLyricIndex = best
                 }
-                
+
                 // Word-by-word / syllable karaoke cadence synchronization
                 if best < self.lyricLines.count {
                     let currentLine = self.lyricLines[best]
@@ -1319,7 +1332,7 @@ public final class AudioPlayerEngine: ObservableObject {
             }
         }
         timeObserverPlayer = newPlayer
-        
+
         // Track completion
         NotificationCenter.default.publisher(for: AVPlayerItem.didPlayToEndTimeNotification, object: playerItem)
             .receive(on: DispatchQueue.main)
@@ -1331,26 +1344,26 @@ public final class AudioPlayerEngine: ObservableObject {
             }
             .store(in: &playerItemCancellables)
     }
-    
+
     /// Smart self-healing recovery when audio stalls or buffers freeze mid-stream
     public func recoverFromStall(forceStreamRefresh: Bool = false) {
         stallRecoveryTask?.cancel()
         stallRecoveryTask = Task { @MainActor in
             guard self.isPlaying, let current = self.currentTrack else { return }
-            
+
             // 1. If not forcing a full stream refresh, give AVPlayer a 2-second grace period to resume buffering
             if !forceStreamRefresh {
                 self.player?.play()
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
                 if Task.isCancelled { return }
-                
+
                 // If it successfully resumed playing, we're all set!
                 if self.player?.timeControlStatus == .playing {
                     self.isBuffering = false
                     return
                 }
             }
-            
+
             // 2. If it's a local/offline file, just seek to current position and restart
             if current.isCached || current.id.hasPrefix("local_") {
                 let savedTime = self.currentTime
@@ -1359,7 +1372,7 @@ public final class AudioPlayerEngine: ObservableObject {
                 self.isBuffering = false
                 return
             }
-            
+
             // 3. For remote YouTube streams: YouTube CDN connections can terminate or throttle mid-song.
             // Seamlessly fetch a fresh, unthrottled streaming URL and resume at the exact second!
             #if DEBUG
@@ -1384,7 +1397,7 @@ public final class AudioPlayerEngine: ObservableObject {
             }
         }
     }
-    
+
     public func togglePlayPause() {
         FluidHaptics.toggle()
         guard let player = player else {
@@ -1395,10 +1408,12 @@ public final class AudioPlayerEngine: ObservableObject {
             }
             return
         }
-        
+
         if isPlaying {
             player.pause()
             outgoingPlayer?.pause()
+            pendingHandoffPlayer?.pause()
+            pendingHandoffPlayer = nil
             isPlaying = false
             ListeningAnalyticsManager.shared.flushPersistedStats()
             updateNowPlayingPlaybackTime()
@@ -1417,19 +1432,19 @@ public final class AudioPlayerEngine: ObservableObject {
         }
         saveCurrentPlaybackState()
     }
-    
+
     public func pause() {
         if isPlaying {
             togglePlayPause()
         }
     }
-    
+
     public func resume() {
         if !isPlaying {
             togglePlayPause()
         }
     }
-    
+
     public func seek(to seconds: Double) {
         guard seconds.isFinite && !seconds.isNaN && seconds >= 0 else { return }
         let clampedSeconds = max(0.0, min(seconds, duration > 0 ? duration : seconds))
@@ -1445,14 +1460,14 @@ public final class AudioPlayerEngine: ObservableObject {
         updateNowPlayingPlaybackTime()
         saveCurrentPlaybackState()
     }
-    
+
     public func next() {
         FluidHaptics.toggle()
         cancelCrossfade()
         slideDirection = .forward
         nextTrack()
     }
-    
+
     /// Immediate forceful track advance (used when user manually flicks album art)
     public func forceNextTrack() {
         FluidHaptics.toggle()
@@ -1461,7 +1476,7 @@ public final class AudioPlayerEngine: ObservableObject {
         slideDirection = .forward
         nextTrack()
     }
-    
+
     public func nextTrack() {
         cancelCrossfade()
         slideDirection = .forward
@@ -1470,10 +1485,10 @@ public final class AudioPlayerEngine: ObservableObject {
             if let first = queue.first { play(track: first) }
             return
         }
-        
+
         if currentIndex + 1 < queue.count {
             play(track: queue[currentIndex + 1])
-            
+
             // Prefetch next radio batch when near end of queue (Only when NOT playing offline library)
             if !isPlayingFromOfflineLibrary && currentIndex + 2 >= queue.count && isAutoplayEnabled {
                 Task { @MainActor in
@@ -1508,7 +1523,7 @@ public final class AudioPlayerEngine: ObservableObject {
             play(track: queue[nextIndex])
         }
     }
-    
+
     public func previous() {
         FluidHaptics.toggle()
         if currentTime > 3.0 {
@@ -1516,14 +1531,14 @@ public final class AudioPlayerEngine: ObservableObject {
             seek(to: 0)
             return
         }
-        
+
         guard !queue.isEmpty, let current = currentTrack,
               let currentIndex = queue.firstIndex(where: { $0.id == current.id }) else {
             cancelCrossfade()
             seek(to: 0)
             return
         }
-        
+
         if currentIndex > 0 {
             let prev = queue[currentIndex - 1]
             cancelCrossfade()
@@ -1540,7 +1555,7 @@ public final class AudioPlayerEngine: ObservableObject {
             seek(to: 0)
         }
     }
-    
+
     /// Immediate forceful track jump back (used when user manually flicks album art)
     public func forcePreviousTrack() {
         FluidHaptics.toggle()
@@ -1551,13 +1566,13 @@ public final class AudioPlayerEngine: ObservableObject {
             seek(to: 0)
             return
         }
-        
+
         guard !queue.isEmpty, let current = currentTrack,
               let currentIndex = queue.firstIndex(where: { $0.id == current.id }) else {
             seek(to: 0)
             return
         }
-        
+
         if currentIndex > 0 {
             play(track: queue[currentIndex - 1])
         } else if repeatMode == .all && queue.count > 1 {
@@ -1567,7 +1582,7 @@ public final class AudioPlayerEngine: ObservableObject {
             seek(to: 0)
         }
     }
-    
+
     private func handleTrackEnded() {
         if isTransitioningCrossfade { return }
         cancelCrossfade()
@@ -1582,7 +1597,7 @@ public final class AudioPlayerEngine: ObservableObject {
             isPlaying = false
             return
         }
-        
+
         switch repeatMode {
         case .one:
             // Repeat one track indefinitely
@@ -1590,7 +1605,7 @@ public final class AudioPlayerEngine: ObservableObject {
             player?.play()
             isPlaying = true
             return
-            
+
         case .all:
             guard !queue.isEmpty, let current = currentTrack,
                   let currentIndex = queue.firstIndex(where: { $0.id == current.id }) else {
@@ -1602,7 +1617,7 @@ public final class AudioPlayerEngine: ObservableObject {
                 // Loop back to the start of the queue
                 play(track: queue[0])
             }
-            
+
         case .off:
             guard !queue.isEmpty, let current = currentTrack,
                   let currentIndex = queue.firstIndex(where: { $0.id == current.id }) else {
@@ -1623,7 +1638,7 @@ public final class AudioPlayerEngine: ObservableObject {
             }
         }
     }
-    
+
     /// Starts playback of a track strictly from local offline library.
     /// Only downloaded tracks (.sonorist bundles) or local disk imports are queued.
     /// Never queries YouTube Music or fetches radio tracks.
@@ -1631,22 +1646,22 @@ public final class AudioPlayerEngine: ObservableObject {
         self.isPlayingFromOfflineLibrary = true
         let offlineTracks = tracks.filter { $0.id.hasPrefix("local_") || cacheManager.isCached(videoId: $0.id) }
         let validList = offlineTracks.isEmpty ? tracks : offlineTracks
-        
+
         if let idx = validList.firstIndex(where: { $0.id == selectedTrack.id }) {
             self.queue = Array(validList[idx...]) + Array(validList[..<idx])
         } else {
             self.queue = validList
         }
-        
+
         if isShuffle {
             var remaining = self.queue.filter { $0.id != selectedTrack.id }
             remaining.shuffle()
             self.queue = [selectedTrack] + remaining
         }
-        
+
         self.play(track: selectedTrack)
     }
-    
+
     /// Starts playback of a track, clears previous queue, and builds YouTube Music's true algorithmic radio queue
     public func playFromSearch(results: [Track] = [], selectedTrack: Track) {
         self.isPlayingFromOfflineLibrary = false
@@ -1655,16 +1670,16 @@ public final class AudioPlayerEngine: ObservableObject {
             seedTrack.artworkURL = localArt
         }
         seedTrack.isCached = cacheManager.isCached(videoId: selectedTrack.id)
-        
+
         self.queue = [seedTrack]
         self.play(track: seedTrack)
-        
+
         // Immediately query YouTube Music algorithmic radio seeded by the ongoing track
         Task { @MainActor in
             do {
                 let radioTracks = try await InnerTubeClient.shared.fetchRadioTracks(for: selectedTrack.id)
                 guard !radioTracks.isEmpty else { return }
-                
+
                 var tracksToAdd: [Track] = []
                 for t in radioTracks {
                     if !self.queue.contains(where: { $0.id == t.id }) {
@@ -1688,19 +1703,19 @@ public final class AudioPlayerEngine: ObservableObject {
             }
         }
     }
-    
+
     /// Starts playback of a track, clears previous search noise from queue, and populates with fresh algorithmic radio tracks
     public func playWithRadioAutoplay(track: Track) {
         self.isPlayingFromOfflineLibrary = false
         self.queue = [track]
         self.play(track: track)
-        
+
         if isAutoplayEnabled {
             Task { @MainActor in
                 do {
                     let radioTracks = try await InnerTubeClient.shared.fetchRadioTracks(for: track.id)
                     guard !radioTracks.isEmpty else { return }
-                    
+
                     for t in radioTracks {
                         if !self.queue.contains(where: { $0.id == t.id }) {
                             self.queue.append(t)
@@ -1714,19 +1729,19 @@ public final class AudioPlayerEngine: ObservableObject {
             }
         }
     }
-    
+
     /// Algorithmic radio: Appends recommended tracks and continues playback
     public func startRadio(for track: Track) async {
         do {
             let radioTracks = try await InnerTubeClient.shared.fetchRadioTracks(for: track.id)
             guard !radioTracks.isEmpty else { return }
-            
+
             for t in radioTracks {
                 if !self.queue.contains(where: { $0.id == t.id }) {
                     self.queue.append(t)
                 }
             }
-            
+
             if let first = radioTracks.first {
                 self.play(track: first)
             }
@@ -1736,35 +1751,35 @@ public final class AudioPlayerEngine: ObservableObject {
             #endif
         }
     }
-    
+
     // MARK: - Queue Management
-    
+
     public func removeFromQueue(at index: Int) {
         guard index >= 0 && index < queue.count else { return }
         queue.remove(at: index)
         saveCurrentPlaybackState()
     }
-    
+
     public func removeFromQueue(atOffsets offsets: IndexSet) {
         queue.remove(atOffsets: offsets)
         saveCurrentPlaybackState()
     }
-    
+
     public func removeFromQueue(id: String) {
         queue.removeAll(where: { $0.id == id })
         saveCurrentPlaybackState()
     }
-    
+
     public func moveInQueue(from source: IndexSet, to destination: Int) {
         queue.move(fromOffsets: source, toOffset: destination)
         saveCurrentPlaybackState()
     }
-    
+
     public func clearQueue() {
         queue.removeAll()
         saveCurrentPlaybackState()
     }
-    
+
     public func addToQueue(track: Track) {
         var queuedTrack = track
         if let localArt = cacheManager.cachedArtworkURL(for: track.id) {
@@ -1774,14 +1789,14 @@ public final class AudioPlayerEngine: ObservableObject {
         queue.append(queuedTrack)
         saveCurrentPlaybackState()
     }
-    
+
     public func playNext(track: Track) {
         var queuedTrack = track
         if let localArt = cacheManager.cachedArtworkURL(for: track.id) {
             queuedTrack.artworkURL = localArt
         }
         queuedTrack.isCached = cacheManager.isCached(videoId: track.id)
-        
+
         if let current = currentTrack, let idx = queue.firstIndex(where: { $0.id == current.id }) {
             queue.insert(queuedTrack, at: idx + 1)
         } else {
@@ -1789,13 +1804,13 @@ public final class AudioPlayerEngine: ObservableObject {
         }
         saveCurrentPlaybackState()
     }
-    
+
     // MARK: - Likes / Favorites
-    
+
     public func isLiked(track: Track) -> Bool {
         return likedTracks.contains(where: { $0.id == track.id })
     }
-    
+
     public func toggleLike(track: Track) {
         FluidHaptics.toggle()
         if let idx = likedTracks.firstIndex(where: { $0.id == track.id }) {
@@ -1815,9 +1830,9 @@ public final class AudioPlayerEngine: ObservableObject {
         }
         saveLikedTracks()
     }
-    
+
     // MARK: - Intentional Listening Auto-Cache (15-Second Skip Gate)
-    
+
     public func triggerAutoSaveForCurrentTrack() {
         guard !isPlayingFromOfflineLibrary else { return }
         guard let track = self.currentTrack, !track.id.hasPrefix("local_") else { return }
@@ -1825,11 +1840,11 @@ public final class AudioPlayerEngine: ObservableObject {
             hasAutoSavedCurrentTrack = true
             return
         }
-        
+
         hasAutoSavedCurrentTrack = true
         let trackToSave = track
         let remoteURL = self.currentStreamRemoteURL
-        
+
         autoSaveTask?.cancel()
         autoSaveTask = Task(priority: .utility) { [weak self] in
             guard let self = self else { return }
@@ -1847,7 +1862,7 @@ public final class AudioPlayerEngine: ObservableObject {
                         fetchedData = data
                     }
                 }
-                
+
                 if fetchedData == nil {
                     let (streamURL, _) = try await InnerTubeClient.shared.resolveStreamURL(for: trackToSave.id)
                     if let safeStream = SecurityAudit.validateURL(streamURL.absoluteString) {
@@ -1862,18 +1877,18 @@ public final class AudioPlayerEngine: ObservableObject {
                         }
                     }
                 }
-                
+
                 guard let audioData = fetchedData, audioData.count > 1024 else { return }
-                
+
                 // 2. Fetch lyrics if not yet loaded
                 let lyrics = self.lyricLines.isEmpty ? await LRCLIBService.shared.fetchLyrics(for: trackToSave) : self.lyricLines
-                
+
                 // 3. Fetch artwork data
                 var artworkData: Data? = nil
                 if let artURL = trackToSave.artworkURL, let safeArt = SecurityAudit.validateURL(artURL.absoluteString) {
                     artworkData = try? await URLSession.shared.data(from: safeArt).0
                 }
-                
+
                 // 4. Pack and commit into compressed .sonorist bundle
                 self.cacheManager.saveBundle(
                     track: trackToSave,
@@ -1881,7 +1896,7 @@ public final class AudioPlayerEngine: ObservableObject {
                     lyrics: lyrics,
                     artworkData: artworkData
                 )
-                
+
                 // 5. Update UI state on MainActor
                 await MainActor.run {
                     if self.currentTrack?.id == trackToSave.id {
@@ -1896,33 +1911,33 @@ public final class AudioPlayerEngine: ObservableObject {
             }
         }
     }
-    
+
     private func saveLikedTracks() {
         if let data = try? JSONEncoder().encode(likedTracks) {
             UserDefaults.standard.set(data, forKey: "SonoristLikedTracks")
         }
     }
-    
+
     private func loadLikedTracks() {
         if let data = UserDefaults.standard.data(forKey: "SonoristLikedTracks") ?? UserDefaults.standard.data(forKey: "MetrolistLikedTracks"),
            let tracks = try? JSONDecoder().decode([Track].self, from: data) {
             self.likedTracks = tracks
         }
     }
-    
+
     // MARK: - Explicit Track Download / Cache
-    
+
     private final class TrackDownloadDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         private let onProgress: @Sendable (Double) -> Void
         private let onCompletion: @Sendable (Data?, Error?) -> Void
         private var buffer = Data()
         private var expectedLength: Int64 = 0
-        
+
         init(onProgress: @escaping @Sendable (Double) -> Void, onCompletion: @escaping @Sendable (Data?, Error?) -> Void) {
             self.onProgress = onProgress
             self.onCompletion = onCompletion
         }
-        
+
         func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
             self.expectedLength = response.expectedContentLength
             if expectedLength > 0 {
@@ -1930,7 +1945,7 @@ public final class AudioPlayerEngine: ObservableObject {
             }
             completionHandler(.allow)
         }
-        
+
         func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
             buffer.append(data)
             if expectedLength > 0 {
@@ -1938,7 +1953,7 @@ public final class AudioPlayerEngine: ObservableObject {
                 onProgress(min(0.99, ratio))
             }
         }
-        
+
         func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
             if let error = error {
                 onCompletion(nil, error)
@@ -1947,18 +1962,18 @@ public final class AudioPlayerEngine: ObservableObject {
             }
         }
     }
-    
+
     public func downloadTrack(track: Track) {
         guard !cacheManager.isCached(videoId: track.id) else { return }
         downloadingTrackIDs.insert(track.id)
         downloadProgress[track.id] = 0.05
-        
+
         Task { @MainActor in
             do {
                 let (streamURL, formatBadge, _) = try await InnerTubeClient.shared.resolveStreamURL(for: track.id, preferredQuality: self.selectedAudioQuality)
                 var req = URLRequest(url: streamURL)
                 req.setValue("com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip", forHTTPHeaderField: "User-Agent")
-                
+
                 let data: Data = try await withCheckedThrowingContinuation { continuation in
                     let delegate = TrackDownloadDelegate(
                         onProgress: { ratio in
@@ -1980,17 +1995,17 @@ public final class AudioPlayerEngine: ObservableObject {
                     let task = session.dataTask(with: req)
                     task.resume()
                 }
-                
+
                 self.downloadProgress[track.id] = 1.0
-                
+
                 // Allow user to perceptibly see 100% completion ring before transitioning to badge
                 try? await Task.sleep(nanoseconds: 400_000_000)
-                
+
                 var updated = track
                 updated.audioFormat = formatBadge
                 updated.isCached = true
                 self.cacheManager.cacheTrack(track: updated, data: data)
-                
+
                 if self.currentTrack?.id == track.id {
                     self.currentTrack?.isCached = true
                 }
@@ -2022,11 +2037,11 @@ public final class AudioPlayerEngine: ObservableObject {
             self.downloadProgress.removeValue(forKey: track.id)
         }
     }
-    
+
     /// Removes a downloaded track from offline storage
     public func removeDownloadedTrack(track: Track) {
         self.cacheManager.removeCachedTrack(videoId: track.id)
-        
+
         if self.currentTrack?.id == track.id {
             self.currentTrack?.isCached = false
         }
@@ -2050,7 +2065,7 @@ public final class AudioPlayerEngine: ObservableObject {
         MobileToastManager.shared.show(message: "Removed from Downloads", icon: "trash")
         #endif
     }
-    
+
     /// Completely purges all offline library bundles, cache files, and extracted artwork
     public func clearAllOfflineDownloads() {
         cacheManager.clearCache()
@@ -2069,27 +2084,27 @@ public final class AudioPlayerEngine: ObservableObject {
         }
         saveCurrentPlaybackState()
     }
-    
+
     // MARK: - Live Synced Lyrics (Multi-Provider, Translation & Music DNA)
-    
+
     public func loadLyrics(for track: Track) async {
         self.isLoadingLyrics = true
         self.lyricLines = []
         self.activeLyricIndex = 0
         self.trackStory = nil
         self.activeWordIndex = -1
-        
+
         // Restore per-track custom lyric offset if previously adjusted
         if UserDefaults.standard.object(forKey: "lyric_offset_\(track.id)") != nil {
             self.userLyricOffset = UserDefaults.standard.double(forKey: "lyric_offset_\(track.id)")
         } else {
             self.userLyricOffset = 0.0
         }
-        
+
         if showTrackStory {
             loadTrackStory(for: track)
         }
-        
+
         // Fast-path: Check offline .sonorist container first (0ms latency, zero network)
         if let cachedLyrics = cacheManager.getCachedLyrics(for: track.id) {
             guard self.currentTrack?.id == track.id else { return }
@@ -2102,25 +2117,25 @@ public final class AudioPlayerEngine: ObservableObject {
             }
             return
         }
-        
+
         // In offline mode, do not perform external LRCLIB network requests
         if isPlayingFromOfflineLibrary {
             self.isLoadingLyrics = false
             return
         }
-        
+
         let lines = await LRCLIBService.shared.fetchLyrics(for: track)
         guard self.currentTrack?.id == track.id else { return }
         self.lyricLines = lines
         self.isLyricsSynced = lines.first?.isSynced ?? true
         self.activeLyricIndex = 0
         self.isLoadingLyrics = false
-        
+
         if showTranslation && lyricLines.contains(where: { ($0.translation?.isEmpty ?? true) }) {
             translateCurrentLyrics()
         }
     }
-    
+
     public func toggleTranslation() {
         FluidHaptics.toggle()
         showTranslation.toggle()
@@ -2131,14 +2146,14 @@ public final class AudioPlayerEngine: ObservableObject {
             }
         }
     }
-    
+
     public func translateCurrentLyrics() {
         guard !lyricLines.isEmpty, !isTranslatingLyrics else { return }
         guard let trackId = currentTrack?.id else { return }
         isTranslatingLyrics = true
         let linesToTranslate = self.lyricLines
         let targetLang = self.targetTranslationLanguage
-        
+
         Task.detached(priority: .userInitiated) {
             let translated = await LRCLIBService.shared.translateLines(linesToTranslate, targetLanguage: targetLang)
             await MainActor.run {
@@ -2149,12 +2164,12 @@ public final class AudioPlayerEngine: ObservableObject {
             }
         }
     }
-    
+
     public func toggleRomanization() {
         FluidHaptics.toggle()
         showRomanization.toggle()
     }
-    
+
     public func toggleTrackStory() {
         FluidHaptics.toggle()
         showTrackStory.toggle()
@@ -2162,7 +2177,7 @@ public final class AudioPlayerEngine: ObservableObject {
             loadTrackStory(for: track)
         }
     }
-    
+
     public func loadTrackStory(for track: Track) {
         isLoadingStory = true
         Task {
@@ -2175,7 +2190,7 @@ public final class AudioPlayerEngine: ObservableObject {
             }
         }
     }
-    
+
     public func adjustLyricOffset(by delta: Double) {
         FluidHaptics.tap()
         let updated = Double(round(100 * (self.userLyricOffset + delta)) / 100)
@@ -2184,7 +2199,7 @@ public final class AudioPlayerEngine: ObservableObject {
             UserDefaults.standard.set(self.userLyricOffset, forKey: "lyric_offset_\(trackId)")
         }
     }
-    
+
     public func resetLyricOffset() {
         FluidHaptics.toggle()
         self.userLyricOffset = 0.0
@@ -2192,7 +2207,7 @@ public final class AudioPlayerEngine: ObservableObject {
             UserDefaults.standard.removeObject(forKey: "lyric_offset_\(trackId)")
         }
     }
-    
+
     /// Instantly aligns lyric synchronization by snapping the selected line to the current playback time
     public func alignLyric(lineIndex: Int) {
         FluidHaptics.snap()
@@ -2204,7 +2219,7 @@ public final class AudioPlayerEngine: ObservableObject {
             UserDefaults.standard.set(self.userLyricOffset, forKey: "lyric_offset_\(trackId)")
         }
     }
-    
+
     public func seekToLyric(at index: Int) {
         FluidHaptics.snap()
         guard index >= 0 && index < lyricLines.count else { return }
@@ -2212,50 +2227,50 @@ public final class AudioPlayerEngine: ObservableObject {
         seek(to: targetTime)
         activeLyricIndex = index
     }
-    
+
     public var currentLyrics: [String] {
         if lyricLines.isEmpty {
             return ["No lyrics available for this track."]
         }
         return lyricLines.map { $0.text }
     }
-    
+
     // MARK: - Sleep Timer Engine
-    
+
     public func setSleepTimer(_ option: SleepTimerOption) {
         FluidHaptics.tap()
         self.sleepTimerOption = option
         sleepTimerTask?.cancel()
         sleepTimerTask = nil
-        
+
         if isFadingForSleepTimer {
             self.volume = self.preFadeVolume
             self.isFadingForSleepTimer = false
         }
-        
+
         guard let seconds = option.durationSeconds else {
             sleepTimerRemainingSeconds = 0
             return
         }
-        
+
         self.sleepTimerRemainingSeconds = seconds
         self.preFadeVolume = self.volume
-        
+
         sleepTimerTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 guard let self = self else { return }
-                
+
                 if self.sleepTimerRemainingSeconds > 0 {
                     self.sleepTimerRemainingSeconds -= 1
-                    
+
                     // Smooth logarithmic/linear 5-second fade-out before stopping
                     if self.sleepTimerRemainingSeconds <= 5 && self.sleepTimerRemainingSeconds > 0 {
                         self.isFadingForSleepTimer = true
                         let factor = Float(self.sleepTimerRemainingSeconds) / 5.0
                         self.volume = max(0, self.preFadeVolume * factor)
                     }
-                    
+
                     if self.sleepTimerRemainingSeconds == 0 {
                         self.cancelCrossfade()
                         self.player?.pause()
@@ -2271,16 +2286,16 @@ public final class AudioPlayerEngine: ObservableObject {
             }
         }
     }
-    
+
     public var formattedSleepTimerRemaining: String {
         guard sleepTimerRemainingSeconds > 0 else { return "" }
         let mins = sleepTimerRemainingSeconds / 60
         let secs = sleepTimerRemainingSeconds % 60
         return String(format: "%d:%02d", mins, secs)
     }
-    
+
     // MARK: - macOS Now Playing & Remote Command Center Integration
-    
+
     private func cleanDisplayTitle(_ title: String) -> String {
         var cleaned = title
         let patterns = [
@@ -2301,7 +2316,7 @@ public final class AudioPlayerEngine: ObservableObject {
         }
         return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
     }
-    
+
     #if os(iOS)
     private static let placeholderArtwork: UIImage? = {
         let size = CGSize(width: 300, height: 300)
@@ -2320,9 +2335,9 @@ public final class AudioPlayerEngine: ObservableObject {
     public func setupRemoteCommands() {
         guard !isRemoteCommandsConfigured else { return }
         isRemoteCommandsConfigured = true
-        
+
         let commandCenter = MPRemoteCommandCenter.shared()
-        
+
         #if os(iOS)
         // beginReceivingRemoteControlEvents MUST be called synchronously BEFORE registering
         // any command targets. The async dispatch was causing targets to be registered before
@@ -2330,7 +2345,7 @@ public final class AudioPlayerEngine: ObservableObject {
         // all command registrations and suppressing Dynamic Island transport buttons.
         UIApplication.shared.beginReceivingRemoteControlEvents()
         #endif
-        
+
         // Clear any previous targets to prevent duplicates
         commandCenter.playCommand.removeTarget(nil)
         commandCenter.pauseCommand.removeTarget(nil)
@@ -2340,7 +2355,7 @@ public final class AudioPlayerEngine: ObservableObject {
         commandCenter.changePlaybackPositionCommand.removeTarget(nil)
         commandCenter.skipForwardCommand.removeTarget(nil)
         commandCenter.skipBackwardCommand.removeTarget(nil)
-        
+
         // togglePlayPauseCommand MUST be enabled — SpringBoard uses it to render the
         // play/pause button in the expanded Dynamic Island and Lock Screen media card.
         // Discrete playCommand + pauseCommand handle the actual play/pause action routing;
@@ -2351,7 +2366,7 @@ public final class AudioPlayerEngine: ObservableObject {
             if self.isPlaying { self.pause() } else { self.resume() }
             return .success
         }
-        
+
         commandCenter.playCommand.isEnabled = true
         commandCenter.playCommand.addTarget { [weak self] _ in
             #if os(iOS)
@@ -2360,25 +2375,25 @@ public final class AudioPlayerEngine: ObservableObject {
             self?.resume()
             return .success
         }
-        
+
         commandCenter.pauseCommand.isEnabled = true
         commandCenter.pauseCommand.addTarget { [weak self] _ in
             self?.pause()
             return .success
         }
-        
+
         commandCenter.nextTrackCommand.isEnabled = true
         commandCenter.nextTrackCommand.addTarget { [weak self] _ in
             self?.next()
             return .success
         }
-        
+
         commandCenter.previousTrackCommand.isEnabled = true
         commandCenter.previousTrackCommand.addTarget { [weak self] _ in
             self?.previous()
             return .success
         }
-        
+
         commandCenter.changePlaybackPositionCommand.isEnabled = true
         commandCenter.changePlaybackPositionCommand.addTarget { [weak self] event in
             if let posEvent = event as? MPChangePlaybackPositionCommandEvent {
@@ -2387,11 +2402,11 @@ public final class AudioPlayerEngine: ObservableObject {
             }
             return .commandFailed
         }
-        
+
         commandCenter.skipForwardCommand.isEnabled = false
         commandCenter.skipBackwardCommand.isEnabled = false
     }
-    
+
     private func updateNowPlaying(track: Track) {
         let displayTitle = cleanDisplayTitle(track.title)
         var info: [String: Any] = [
@@ -2403,27 +2418,27 @@ public final class AudioPlayerEngine: ObservableObject {
             MPNowPlayingInfoPropertyDefaultPlaybackRate: 1.0,
             MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue
         ]
-        
+
         let rawAlbum = (track.album ?? "").trimmingCharacters(in: CharacterSet.punctuationCharacters.union(.whitespacesAndNewlines))
         if !rawAlbum.isEmpty && rawAlbum != track.title && rawAlbum.lowercased() != "youtube music" && rawAlbum != "," {
             info[MPMediaItemPropertyAlbumTitle] = rawAlbum
         }
-        
+
         #if os(iOS)
         if let placeholder = Self.placeholderArtwork {
             info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: placeholder.size) { _ in placeholder }
         }
         #endif
-        
+
         self.nowPlayingInfo = info
         MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : .paused
         MPNowPlayingInfoCenter.default().nowPlayingInfo = self.nowPlayingInfo
-        
+
         if let artworkURL = track.artworkURL {
             loadArtworkForNowPlaying(url: artworkURL, trackId: track.id)
         }
     }
-    
+
     private func updateNowPlayingPlaybackTime() {
         guard !nowPlayingInfo.isEmpty else { return }
         nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
@@ -2435,13 +2450,13 @@ public final class AudioPlayerEngine: ObservableObject {
         MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : .paused
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
     }
-    
+
     private static let artworkCache: NSCache<NSString, MPMediaItemArtwork> = {
         let cache = NSCache<NSString, MPMediaItemArtwork>()
         cache.countLimit = 30
         return cache
     }()
-    
+
     private func loadArtworkForNowPlaying(url: URL, trackId: String) {
         let urlKey = url.absoluteString as NSString
         if let cached = Self.artworkCache.object(forKey: urlKey) {
@@ -2449,7 +2464,7 @@ public final class AudioPlayerEngine: ObservableObject {
             MPNowPlayingInfoCenter.default().nowPlayingInfo = self.nowPlayingInfo
             return
         }
-        
+
         #if os(iOS)
         // If it's a local file URL (e.g. offline downloaded track), load synchronously
         if url.isFileURL, let uiImage = UIImage(contentsOfFile: url.path) {
@@ -2468,9 +2483,9 @@ public final class AudioPlayerEngine: ObservableObject {
             return
         }
         #endif
-        
+
         guard let safeURL = SecurityAudit.validateURL(url.absoluteString) else { return }
-        
+
         Task {
             do {
                 let (data, _) = try await URLSession.shared.data(from: safeURL)
