@@ -222,8 +222,8 @@ public struct SettingsView: View {
                 .padding(14)
             }
             
-            // AI Curated Playlists
-            settingsGroup(title: "AI PLAYLIST CURATOR") {
+            // Smart Playlists
+            settingsGroup(title: "SMART PLAYLISTS") {
                 VStack(spacing: 0) {
                     HStack {
                         VStack(alignment: .leading, spacing: 3) {
@@ -267,9 +267,9 @@ public struct SettingsView: View {
 
                     HStack {
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("AI Provider")
+                            Text("Provider")
                                 .font(.system(size: 13, weight: .medium))
-                            Text("Service used for intelligent song classification.")
+                            Text("Service used for song classification.")
                                 .font(.system(size: 11))
                                 .foregroundColor(.secondary)
                         }

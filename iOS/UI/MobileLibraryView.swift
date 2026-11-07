@@ -144,22 +144,23 @@ public struct MobileLibraryView: View {
             .padding(.bottom, 6)
             
             // Track List
-            Group {
+            List {
+                if model.selectedSegment == .downloaded {
+                    playlistsFolderRow
+                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                }
+                
                 let tracks = currentTracks
                 if tracks.isEmpty {
                     VStack(spacing: 12) {
-                        if model.selectedSegment == .downloaded {
-                            aiCuratedFolderRow
-                                .padding(.horizontal, 16)
-                                .padding(.top, 4)
-                        }
-                        
                         Image(systemName: model.selectedSegment == .downloaded ? "arrow.down.circle" : "heart.slash")
-                            .font(.system(size: 44))
-                            .foregroundColor(.secondary)
+                            .font(.system(size: 40))
+                            .foregroundColor(.secondary.opacity(0.6))
                         
                         Text(model.selectedSegment == .downloaded ? "No Offline Tracks" : "No Favorites Yet")
-                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .font(.system(size: 16, weight: .semibold, design: .rounded))
                         
                         Text(model.selectedSegment == .downloaded ? "Tracks downloaded in Sonorist will appear here for zero-data listening." : "Tap the heart on any song to save it to your favorites.")
                             .font(.system(size: 13))
@@ -167,44 +168,39 @@ public struct MobileLibraryView: View {
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, 32)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(.top, 80)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 40)
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
                 } else {
-                    List {
-                        if model.selectedSegment == .downloaded {
-                            aiCuratedFolderRow
-                                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
-                                .listRowSeparator(.hidden)
-                                .listRowBackground(Color.clear)
-                        }
-                        
-                        ForEach(tracks, id: \.id) { track in
-                            libraryTrackRow(for: track)
-                                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-                                .listRowSeparator(.hidden)
-                                .listRowBackground(Color.clear)
-                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                    if model.selectedSegment == .downloaded || MediaCacheManager.shared.isCached(videoId: track.id) {
-                                        Button(role: .destructive) {
-                                            player.removeDownloadedTrack(track: track)
-                                        } label: {
-                                            Label("Remove", systemImage: "trash")
-                                        }
+                    ForEach(tracks, id: \.id) { track in
+                        libraryTrackRow(for: track)
+                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                if model.selectedSegment == .downloaded || MediaCacheManager.shared.isCached(videoId: track.id) {
+                                    Button(role: .destructive) {
+                                        player.removeDownloadedTrack(track: track)
+                                    } label: {
+                                        Label("Remove", systemImage: "trash")
                                     }
                                 }
-                        }
-                    }
-                    .listStyle(.plain)
-                    .scrollContentBackground(.hidden)
-                    .safeAreaInset(edge: .bottom) {
-                        Color.clear.frame(height: 180)
+                            }
                     }
                 }
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .safeAreaInset(edge: .bottom) {
+                Color.clear.frame(height: 180)
             }
             .id(model.refreshID)
         }
         .onAppear {
             model.loadOfflineTracks()
+            AIPlaylistEngine.shared.reconcileWithCachedTracks()
         }
         .onReceive(NotificationCenter.default.publisher(for: AudioPlayerEngine.trackDidCacheNotification)) { _ in
             model.loadOfflineTracks()
@@ -231,55 +227,45 @@ public struct MobileLibraryView: View {
         }
     }
     
-    private var aiCuratedFolderRow: some View {
+    private var playlistsFolderRow: some View {
         Button {
             MobileHaptics.trigger(.medium)
             model.showingAICuratedFolder = true
         } label: {
             HStack(spacing: 14) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [FluidTheme.musicRed.opacity(0.2), Color.purple.opacity(0.18)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 48, height: 48)
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(FluidTheme.musicRed.opacity(0.12))
+                        .frame(width: 44, height: 44)
 
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 20, weight: .bold))
+                    Image(systemName: "music.note.list")
+                        .font(.system(size: 20, weight: .semibold))
                         .foregroundColor(FluidTheme.musicRed)
                 }
 
                 VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Text("Automated Playlists")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundColor(isLight ? .primary : .white)
+                    Text("Playlists")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(isLight ? .primary : .white)
 
-                        Text("AI")
-                            .font(.system(size: 10, weight: .bold, design: .rounded))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(FluidTheme.musicRed)
-                            .clipShape(Capsule())
+                    let total = AIPlaylistEngine.shared.curatedLibrary.totalTrackCount
+                    let catCount = AIPlaylistEngine.shared.curatedLibrary.categories.count
+                    if total > 0 {
+                        Text("\(total) \(total == 1 ? "song" : "songs") • \(catCount) \(catCount == 1 ? "category" : "categories")")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                    } else {
+                        Text("Organized by language & genre")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
                     }
-
-                    let langCount = AIPlaylistEngine.shared.curatedLibrary.categories.count
-                    let trackCount = AIPlaylistEngine.shared.curatedLibrary.totalTrackCount
-                    Text(langCount > 0 ? "\(langCount) Languages • \(trackCount) Songs" : "Curate with AI • Tap to organize")
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
                 }
 
                 Spacer()
 
                 Image(systemName: "chevron.right")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.secondary.opacity(0.5))
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)

@@ -24,7 +24,7 @@ public struct AICuratedPlaylistsFolderView: View {
                     folderListView
                 }
             }
-            .navigationTitle("Automated Playlists")
+            .navigationTitle("Playlists")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.large)
             #endif
@@ -90,58 +90,7 @@ public struct AICuratedPlaylistsFolderView: View {
 
     private var folderListView: some View {
         List {
-            // Automation Status Card
-            Section {
-                HStack(spacing: 12) {
-                    ZStack {
-                        Circle()
-                            .fill(FluidTheme.musicRed.opacity(0.15))
-                            .frame(width: 36, height: 36)
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundColor(FluidTheme.musicRed)
-                    }
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 6) {
-                            Text("AI Auto-Curation")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(isLight ? .primary : .white)
-                            Text("Active")
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundColor(.green)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.green.opacity(0.15))
-                                .clipShape(Capsule())
-                        }
-                        if !engine.pendingQueue.isEmpty {
-                            HStack(spacing: 4) {
-                                Image(systemName: "clock.arrow.circlepath")
-                                    .font(.system(size: 11))
-                                Text("\(engine.pendingQueue.count) pending outbox sync")
-                                    .font(.system(size: 11, weight: .medium))
-                            }
-                            .foregroundColor(.orange)
-                        } else if let lastSync = config.lastSyncDate {
-                            Text("All downloaded tracks synchronized")
-                                .font(.system(size: 12))
-                                .foregroundColor(.secondary)
-                        } else {
-                            Text("Songs automatically categorized on download")
-                                .font(.system(size: 12))
-                                .foregroundColor(.secondary)
-                        }
-                    }
-
-                    Spacer()
-                }
-                .padding(.vertical, 4)
-                .listRowBackground(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(isLight ? Color.white : Color.platformSecondarySystemBackground)
-                )
-            }
+            // Language Folders
 
             // Language Folders
             Section("Languages (\(engine.curatedLibrary.categories.count))") {
@@ -199,107 +148,49 @@ public struct AICuratedPlaylistsFolderView: View {
     // MARK: - Zero-State Onboarding
 
     private var emptyOnboardingView: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 16) {
             Spacer()
 
             ZStack {
                 Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [FluidTheme.musicRed.opacity(0.25), Color.purple.opacity(0.2)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 90, height: 90)
+                    .fill(FluidTheme.musicRed.opacity(0.12))
+                    .frame(width: 80, height: 80)
 
-                Image(systemName: "sparkles")
-                    .font(.system(size: 40, weight: .medium))
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [FluidTheme.musicRed, Color.pink],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
+                Image(systemName: "music.note.list")
+                    .font(.system(size: 36, weight: .semibold))
+                    .foregroundColor(FluidTheme.musicRed)
             }
 
-            VStack(spacing: 8) {
-                Text("Curate Your Music with AI")
-                    .font(.system(size: 22, weight: .bold))
+            VStack(spacing: 6) {
+                Text("No Playlists Yet")
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
                     .foregroundColor(isLight ? .primary : .white)
 
-                Text("Automatically organize all your offline downloaded songs into language and genre folders.")
-                    .font(.system(size: 14))
+                Text("Songs you download will automatically be organized here into genre and language collections.")
+                    .font(.system(size: 13))
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
+                    .padding(.horizontal, 36)
             }
 
-            // Steps Card
-            VStack(alignment: .leading, spacing: 12) {
-                stepRow(number: "1", title: "Add Your Free API Key", desc: "Get a free Google Gemini or Groq key in Settings.")
-                stepRow(number: "2", title: "Automatic Sorting", desc: "Songs are clustered into focused genres (max 5 per language).")
-                stepRow(number: "3", title: "Seamless Background Sync", desc: "Updates automatically upon download or once daily.")
-            }
-            .padding(18)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(isLight ? Color.white : Color.platformSecondarySystemBackground)
-            )
-            .padding(.horizontal, 24)
-
-            VStack(spacing: 12) {
-                Button {
-                    MobileHaptics.trigger(.medium)
-                    engine.showingSettingsSheet = true
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "gearshape.fill")
-                        Text("Configure in Settings")
-                    }
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(FluidTheme.musicRed)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            Button {
+                MobileHaptics.trigger(.medium)
+                engine.showingSettingsSheet = true
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "gearshape")
+                    Text("Settings")
                 }
-                .padding(.horizontal, 24)
-
-                Button {
-                    MobileHaptics.trigger(.light)
-                    Task {
-                        await engine.curateEntireLibrary(force: true)
-                    }
-                } label: {
-                    Text("Organize Using Local Heuristics")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(FluidTheme.musicRed)
-                }
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(FluidTheme.musicRed)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(FluidTheme.musicRed.opacity(0.12))
+                .clipShape(Capsule())
             }
+            .padding(.top, 8)
 
             Spacer()
-        }
-    }
-
-    private func stepRow(number: String, title: String, desc: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Text(number)
-                .font(.system(size: 13, weight: .bold, design: .rounded))
-                .foregroundColor(FluidTheme.musicRed)
-                .frame(width: 22, height: 22)
-                .background(FluidTheme.musicRed.opacity(0.12))
-                .clipShape(Circle())
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(isLight ? .primary : .white)
-                Text(desc)
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-            }
         }
     }
 
@@ -569,7 +460,7 @@ public struct AISettingsSheet: View {
         NavigationStack {
             Form {
                 // Provider Selection
-                Section("AI Provider") {
+                Section("Provider") {
                     Picker("Provider", selection: $config.selectedProvider) {
                         ForEach(AIProvider.allCases) { prov in
                             Text(prov.displayName).tag(prov)
@@ -644,10 +535,10 @@ public struct AISettingsSheet: View {
                 }
 
                 // Automation Toggles
-                Section("Automation Workflows") {
-                    Toggle("Curate on Download", isOn: $config.isAutoCurateOnDownloadEnabled)
+                Section("Playlists") {
+                    Toggle("Organize on Download", isOn: $config.isAutoCurateOnDownloadEnabled)
                         .tint(FluidTheme.musicRed)
-                    Text("Automatically analyzes and adds new songs to genre folders when downloaded.")
+                    Text("Automatically adds new songs to genre folders when downloaded.")
                         .font(.system(size: 12))
                         .foregroundColor(.secondary)
 
@@ -707,19 +598,19 @@ public struct AISettingsSheet: View {
                                 ProgressView()
                                     .padding(.trailing, 6)
                             }
-                            Text(engine.isCurating ? "Organizing Songs with AI..." : "Re-Organize Entire Offline Library with AI")
+                            Text(engine.isCurating ? "Organizing Songs..." : "Re-Organize Offline Library")
                                 .font(.system(size: 15, weight: .semibold))
                         }
                         .foregroundColor(FluidTheme.musicRed)
                     }
                     .disabled(engine.isCurating || engine.testingConnection)
 
-                    Text("Sends all downloaded songs to the AI to re-classify them into language and genre playlists.")
+                    Text("Re-classifies all downloaded songs into language and genre playlists.")
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
                 }
             }
-            .navigationTitle("AI Curator Settings")
+            .navigationTitle("Playlist Settings")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif

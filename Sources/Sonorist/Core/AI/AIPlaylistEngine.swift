@@ -61,6 +61,36 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
         }
         if let loaded = loaded {
             self.curatedLibrary = loaded
+            reconcileWithCachedTracks()
+        }
+    }
+
+    /// Prunes orphaned track IDs that no longer exist in the local offline media cache.
+    public func reconcileWithCachedTracks() {
+        let cachedTracks = cacheManager.getAllCachedTracks()
+        let cachedIds = Set(cachedTracks.map { $0.id })
+
+        var pendingChanged = false
+        let origPendingCount = pendingQueue.count
+        pendingQueue.removeAll(where: { !cachedIds.contains($0.id) })
+        if pendingQueue.count != origPendingCount {
+            savePendingQueue()
+        }
+
+        var libraryChanged = false
+        for lIdx in (0..<curatedLibrary.categories.count).reversed() {
+            for gIdx in (0..<curatedLibrary.categories[lIdx].genres.count).reversed() {
+                let prev = curatedLibrary.categories[lIdx].genres[gIdx].trackIds.count
+                curatedLibrary.categories[lIdx].genres[gIdx].trackIds.removeAll(where: { !cachedIds.contains($0) })
+                if curatedLibrary.categories[lIdx].genres[gIdx].trackIds.count != prev {
+                    libraryChanged = true
+                }
+            }
+            curatedLibrary.categories[lIdx].genres.removeAll(where: { $0.trackIds.isEmpty })
+        }
+        curatedLibrary.categories.removeAll(where: { $0.genres.isEmpty })
+        if libraryChanged {
+            saveLibrary()
         }
     }
 
