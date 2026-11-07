@@ -222,6 +222,98 @@ public struct SettingsView: View {
                 .padding(14)
             }
             
+            // AI Curated Playlists
+            settingsGroup(title: "AI PLAYLIST CURATOR") {
+                VStack(spacing: 0) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Automatic Curation on Download")
+                                .font(.system(size: 13, weight: .medium))
+                            Text("Automatically categorizes downloaded songs into languages and genres.")
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Toggle("", isOn: Binding(
+                            get: { AIProviderConfig.shared.isAutoCurateOnDownloadEnabled },
+                            set: { AIProviderConfig.shared.isAutoCurateOnDownloadEnabled = $0; FluidHaptics.toggle() }
+                        ))
+                        .labelsHidden()
+                        .toggleStyle(SwitchToggleStyle(tint: FluidTheme.musicRed))
+                    }
+                    .padding(14)
+                    
+                    Divider().opacity(0.2)
+                    
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Daily Auto-Refresh")
+                                .font(.system(size: 13, weight: .medium))
+                            Text("Verifies and reorganizes offline playlists once every 24 hours.")
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Toggle("", isOn: Binding(
+                            get: { AIProviderConfig.shared.isDailyRefreshEnabled },
+                            set: { AIProviderConfig.shared.isDailyRefreshEnabled = $0; FluidHaptics.toggle() }
+                        ))
+                        .labelsHidden()
+                        .toggleStyle(SwitchToggleStyle(tint: FluidTheme.musicRed))
+                    }
+                    .padding(14)
+
+                    Divider().opacity(0.2)
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("AI Provider")
+                                .font(.system(size: 13, weight: .medium))
+                            Text("Service used for intelligent song classification.")
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Picker("", selection: Binding(
+                            get: { AIProviderConfig.shared.selectedProvider },
+                            set: { (val: AIProvider) in
+                                AIProviderConfig.shared.selectedProvider = val
+                                FluidHaptics.tap()
+                            }
+                        )) {
+                            ForEach(AIProvider.allCases) { prov in
+                                Text(prov.displayName).tag(prov)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 180)
+                    }
+                    .padding(14)
+
+                    if AIProviderConfig.shared.selectedProvider != .ollama {
+                        Divider().opacity(0.2)
+                        
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("API Key")
+                                    .font(.system(size: 13, weight: .medium))
+                                Text("Stored securely. Only song title and artist are transmitted.")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            SecureField("Enter API Key", text: Binding(
+                                get: { AIProviderConfig.shared.apiKey },
+                                set: { AIProviderConfig.shared.apiKey = $0 }
+                            ))
+                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                            .frame(width: 200)
+                        }
+                        .padding(14)
+                    }
+                }
+            }
+            
             // Audio Transitions & Volume
             settingsGroup(title: "AUDIO TRANSITIONS & VOLUME") {
                 VStack(spacing: 0) {

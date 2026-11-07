@@ -357,6 +357,11 @@ public final class MediaCacheManager: @unchecked Sendable {
                 }
                 self.cachedTracksMetadata[safeId] = t
                 self.saveManifest()
+
+                // Silently trigger background AI playlist classification
+                Task.detached(priority: .background) {
+                    await AIPlaylistEngine.shared.categorizeNewTrack(t)
+                }
             } catch {
                 #if DEBUG
                 print("[Sonorist Bundle Save Error]: \(error.localizedDescription)")
@@ -581,6 +586,7 @@ public final class MediaCacheManager: @unchecked Sendable {
         }
         DispatchQueue.main.async {
             NotificationCenter.default.post(name: AudioPlayerEngine.trackDidCacheNotification, object: safeId)
+            AIPlaylistEngine.shared.handleTrackRemoved(videoId: safeId)
         }
     }
     

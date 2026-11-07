@@ -33,6 +33,10 @@
 		E9B8A0032C12345678901234 /* Settings.bundle in Resources */ = {isa = PBXBuildFile; fileRef = E9B8A0042C12345678901234 /* Settings.bundle */; };
 		E9B8A0052C12345678901234 /* MobileSleepTimerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9B8A0062C12345678901234 /* MobileSleepTimerSheet.swift */; };
 		E9B8A0072C12345678901234 /* MobileEqualizerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9B8A0082C12345678901234 /* MobileEqualizerSheet.swift */; };
+		E9B8A0112C12345678901234 /* AIPlaylistModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9B8A0122C12345678901234 /* AIPlaylistModel.swift */; };
+		E9B8A0132C12345678901234 /* AIProviderConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9B8A0142C12345678901234 /* AIProviderConfig.swift */; };
+		E9B8A0152C12345678901234 /* AIPlaylistEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9B8A0162C12345678901234 /* AIPlaylistEngine.swift */; };
+		E9B8A0172C12345678901234 /* AICuratedPlaylistsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9B8A0182C12345678901234 /* AICuratedPlaylistsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -64,6 +68,10 @@
 		E1E2A5D6260E4BEE9D918143 /* FluidTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = FluidTheme.swift; path = ../Sources/Sonorist/UI/DesignSystem/FluidTheme.swift; sourceTree = "<group>"; };
 		E49E0C80E1C54135906FFC32 /* ListeningAnalyticsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ListeningAnalyticsManager.swift; path = ../Sources/Sonorist/Core/Analytics/ListeningAnalyticsManager.swift; sourceTree = "<group>"; };
 		EEC822E983E24ED49BBFE178 /* InnerTubeModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = InnerTubeModels.swift; path = ../Sources/Sonorist/Core/InnerTube/InnerTubeModels.swift; sourceTree = "<group>"; };
+		E9B8A0122C12345678901234 /* AIPlaylistModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AIPlaylistModel.swift; path = ../Sources/Sonorist/Core/AI/AIPlaylistModel.swift; sourceTree = "<group>"; };
+		E9B8A0142C12345678901234 /* AIProviderConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AIProviderConfig.swift; path = ../Sources/Sonorist/Core/AI/AIProviderConfig.swift; sourceTree = "<group>"; };
+		E9B8A0162C12345678901234 /* AIPlaylistEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AIPlaylistEngine.swift; path = ../Sources/Sonorist/Core/AI/AIPlaylistEngine.swift; sourceTree = "<group>"; };
+		E9B8A0182C12345678901234 /* AICuratedPlaylistsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AICuratedPlaylistsView.swift; path = UI/AICuratedPlaylistsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -113,6 +121,10 @@
 				E9B8A0022C12345678901234 /* MobileSettingsView.swift */,
 				E9B8A0062C12345678901234 /* MobileSleepTimerSheet.swift */,
 				E9B8A0082C12345678901234 /* MobileEqualizerSheet.swift */,
+				E9B8A0122C12345678901234 /* AIPlaylistModel.swift */,
+				E9B8A0142C12345678901234 /* AIProviderConfig.swift */,
+				E9B8A0162C12345678901234 /* AIPlaylistEngine.swift */,
+				E9B8A0182C12345678901234 /* AICuratedPlaylistsView.swift */,
 			);
 			name = Sources;
 			sourceTree = "<group>";
@@ -220,6 +232,10 @@
 				E9B8A0012C12345678901234 /* MobileSettingsView.swift in Sources */,
 				E9B8A0052C12345678901234 /* MobileSleepTimerSheet.swift in Sources */,
 				E9B8A0072C12345678901234 /* MobileEqualizerSheet.swift in Sources */,
+				E9B8A0112C12345678901234 /* AIPlaylistModel.swift in Sources */,
+				E9B8A0132C12345678901234 /* AIProviderConfig.swift in Sources */,
+				E9B8A0152C12345678901234 /* AIPlaylistEngine.swift in Sources */,
+				E9B8A0172C12345678901234 /* AICuratedPlaylistsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

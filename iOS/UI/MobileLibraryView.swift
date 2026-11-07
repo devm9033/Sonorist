@@ -5,6 +5,7 @@ public final class MobileLibraryModel: ObservableObject {
     @Published public var selectedSegment: MobileLibrarySegment = .downloaded
     @Published public var showSettings: Bool = false
     @Published public var showClearAllConfirmation: Bool = false
+    @Published public var showingAICuratedFolder: Bool = false
     @Published public var refreshID: UUID = UUID()
     @Published public var offlineTracks: [Track] = []
     
@@ -34,6 +35,9 @@ public enum MobileLibrarySegment: String, CaseIterable, Identifiable {
 public struct MobileLibraryView: View {
     @ObservedObject private var player = AudioPlayerEngine.shared
     @ObservedObject private var model = MobileLibraryModel.shared
+    @Environment(\.colorScheme) private var colorScheme
+    
+    private var isLight: Bool { colorScheme == .light }
     
     public init() {}
     
@@ -144,6 +148,12 @@ public struct MobileLibraryView: View {
                 let tracks = currentTracks
                 if tracks.isEmpty {
                     VStack(spacing: 12) {
+                        if model.selectedSegment == .downloaded {
+                            aiCuratedFolderRow
+                                .padding(.horizontal, 16)
+                                .padding(.top, 4)
+                        }
+                        
                         Image(systemName: model.selectedSegment == .downloaded ? "arrow.down.circle" : "heart.slash")
                             .font(.system(size: 44))
                             .foregroundColor(.secondary)
@@ -161,6 +171,13 @@ public struct MobileLibraryView: View {
                     .padding(.top, 80)
                 } else {
                     List {
+                        if model.selectedSegment == .downloaded {
+                            aiCuratedFolderRow
+                                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
+                        }
+                        
                         ForEach(tracks, id: \.id) { track in
                             libraryTrackRow(for: track)
                                 .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
@@ -209,6 +226,69 @@ public struct MobileLibraryView: View {
         } message: {
             Text("This will permanently delete all \(model.offlineTracks.count) downloaded songs and free \(MediaCacheManager.shared.getFormattedCacheSize()) of storage on your iPhone.")
         }
+        .sheet(isPresented: $model.showingAICuratedFolder) {
+            AICuratedPlaylistsFolderView()
+        }
+    }
+    
+    private var aiCuratedFolderRow: some View {
+        Button {
+            MobileHaptics.trigger(.medium)
+            model.showingAICuratedFolder = true
+        } label: {
+            HStack(spacing: 14) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [FluidTheme.musicRed.opacity(0.2), Color.purple.opacity(0.18)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 48, height: 48)
+
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundColor(FluidTheme.musicRed)
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text("Automated Playlists")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundColor(isLight ? .primary : .white)
+
+                        Text("AI")
+                            .font(.system(size: 10, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(FluidTheme.musicRed)
+                            .clipShape(Capsule())
+                    }
+
+                    let langCount = AIPlaylistEngine.shared.curatedLibrary.categories.count
+                    let trackCount = AIPlaylistEngine.shared.curatedLibrary.totalTrackCount
+                    Text(langCount > 0 ? "\(langCount) Languages • \(trackCount) Songs" : "Curate with AI • Tap to organize")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.secondary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(isLight ? Color.white : Color.platformSecondarySystemBackground)
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
     }
     
     private var currentTracks: [Track] {

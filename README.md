@@ -7,7 +7,7 @@
 [![macOS 14+](https://img.shields.io/badge/macOS-14.0%2B-black?style=flat&logo=apple)](https://apple.com)
 [![Swift 5.9](https://img.shields.io/badge/Swift-5.9%2B-orange?style=flat&logo=swift)](https://swift.org)
 [![Version 2.2.0](https://img.shields.io/badge/Version-2.2.0-blue?style=flat)](Info.plist)
-[![Tests Passing](https://img.shields.io/badge/Tests-53%2F53%20Passed-brightgreen?style=flat)](Tests/)
+[![Tests Passing](https://img.shields.io/badge/Tests-56%2F56%20Passed-brightgreen?style=flat)](Tests/)
 [![License MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Zero Telemetry](https://img.shields.io/badge/Privacy-100%25%20Local-success?style=flat&logo=apple)](README.md#%EF%B8%8F-security--privacy-architecture)
 
@@ -86,7 +86,7 @@ Sonorist brings together modern audio engineering and Apple design principles:
 
 ## 🛡️ Security, Penetration Testing & Privacy Architecture
 
-Sonorist has been audited against penetration, stress, and security test vectors with a **100% pass rate (53/53 tests)**:
+Sonorist has been audited against penetration, stress, and security test vectors with a **100% pass rate (56/56 tests)**:
 
 * **100% Local Privacy & Zero Telemetry:** Sonorist contains zero analytics SDKs, zero crash beacons, and zero telemetry trackers. All play counts, history, offline compressed tracks, and audio settings are stored strictly in the local sandboxed application directory.
 * **Zero Private Data Transmitted:** Outgoing network traffic is strictly confined to official YouTube/InnerTube endpoints for search/streams and open LRCLIB endpoints for lyrics. No user machine identity, IP logs, credentials, or personal tokens are ever transmitted.

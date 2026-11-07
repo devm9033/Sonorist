@@ -1125,6 +1125,80 @@ struct SonoristTestsRunner {
             engine.cacheManager.removeCachedTrack(videoId: trackB.id)
         }
         
+        test("AI Curated Playlists: Hierarchical Language & Genre Persistence with 5-Genre Cap") {
+            var library = AICuratedLibrary()
+            
+            // Insert 6 different genres into Hindi
+            library.insert(trackId: "h1", language: "Hindi", genreName: "Pop & Dance")
+            library.insert(trackId: "h2", language: "Hindi", genreName: "Melodic & Romance")
+            library.insert(trackId: "h3", language: "Hindi", genreName: "Acoustic & Chill")
+            library.insert(trackId: "h4", language: "Hindi", genreName: "Classics & Heritage")
+            library.insert(trackId: "h5", language: "Hindi", genreName: "Energetic & Rap")
+            library.insert(trackId: "h6", language: "Hindi", genreName: "Excess Sixth Genre") // Must be capped!
+            
+            guard let hindi = library.categories.first(where: { $0.language == "Hindi" }) else {
+                throw TestError("Expected Hindi category to be created")
+            }
+            
+            // Verify max 5 genres enforced
+            guard hindi.genres.count == 5 else {
+                throw TestError("Expected exactly 5 genres due to strict Apple HIG cap, got \(hindi.genres.count)")
+            }
+            
+            // Verify JSON round-trip
+            let encoder = JSONEncoder()
+            let data = try encoder.encode(library)
+            let decoded = try JSONDecoder().decode(AICuratedLibrary.self, from: data)
+            guard decoded.categories.first?.genres.count == 5 else {
+                throw TestError("Decoded library must match 5 genres")
+            }
+        }
+        
+        test("AI Curated Playlists: Dynamic Track Removal and Empty Pruning") {
+            var library = AICuratedLibrary()
+            library.insert(trackId: "del_1", language: "English", genreName: "Pop & Dance")
+            library.insert(trackId: "del_2", language: "English", genreName: "Pop & Dance")
+            
+            guard library.totalTrackCount == 2 else {
+                throw TestError("Expected 2 tracks initially")
+            }
+            
+            // Remove one track
+            library.remove(trackId: "del_1")
+            guard library.totalTrackCount == 1 else {
+                throw TestError("Expected 1 track after removal")
+            }
+            
+            // Remove remaining track: empty genre & category should be cleanly pruned
+            library.remove(trackId: "del_2")
+            guard library.categories.isEmpty else {
+                throw TestError("Expected empty category to be pruned")
+            }
+        }
+        
+        test("AI Curated Playlists: Native Offline Heuristic Classification") {
+            let engine = AIPlaylistEngine.shared
+            
+            let hindiTrack = Track(id: "h_trk", title: "Tujhe Dekha Toh", artist: "Kumar Sanu, Lata Mangeshkar", durationSeconds: 200)
+            let popTrack = Track(id: "pop_trk", title: "Levitating Dance Remix", artist: "Dua Lipa", durationSeconds: 180)
+            let punjabiTrack = Track(id: "pun_trk", title: "Lover", artist: "Diljit Dosanjh", durationSeconds: 190)
+            
+            // Run synchronous deterministic classification
+            let hindiResult = engine.classifyTrackHeuristically(hindiTrack)
+            let popResult = engine.classifyTrackHeuristically(popTrack)
+            let punjabiResult = engine.classifyTrackHeuristically(punjabiTrack)
+            
+            guard hindiResult.language == "Hindi" else {
+                throw TestError("Expected Hindi language for Kumar Sanu, got \(hindiResult.language)")
+            }
+            guard popResult.language == "English" && popResult.genre == "Pop & Dance" else {
+                throw TestError("Expected English Pop & Dance for Levitating Dance Remix, got \(popResult.language) - \(popResult.genre)")
+            }
+            guard punjabiResult.language == "Punjabi" else {
+                throw TestError("Expected Punjabi language for Diljit Dosanjh, got \(punjabiResult.language)")
+            }
+        }
+        
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         print("  Results: \(passed) passed, \(failed) failed")
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
