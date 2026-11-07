@@ -482,6 +482,7 @@ public struct MobileNowPlayingSheet: View {
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .shadow(color: .black.opacity(isLight ? 0.20 : 0.40), radius: 20, x: 0, y: 10)
         .scaleEffect(player.isPlaying ? 1.0 : 0.92)
+        .animation(FluidTheme.fluidSpring, value: player.isPlaying)
     }
 
     private func largeArtworkView(size: CGFloat) -> some View {
@@ -553,6 +554,14 @@ public struct MobileNowPlayingSheet: View {
         }
         .frame(width: size, height: size)
         .contentShape(Rectangle())
+        .onTapGesture {
+            guard !model.showLyrics else { return }
+            guard !model.isTransitioningArtwork, !model.isDraggingArtwork, abs(model.artworkDragOffset) < 4 else { return }
+            MobileHaptics.trigger(.heavy)
+            withAnimation(FluidTheme.fluidSpring) {
+                player.togglePlayPause()
+            }
+        }
         .simultaneousGesture(
             DragGesture(minimumDistance: 8)
                 .onChanged { value in
