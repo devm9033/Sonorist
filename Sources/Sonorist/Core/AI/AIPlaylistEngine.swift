@@ -395,13 +395,6 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
         defer { self.testingConnection = false }
 
         let provider = config.selectedProvider
-        let apiKey = config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if provider == .gemini {
-            if let discovered = await discoverGeminiModel(apiKey: apiKey) {
-                config.activeGeminiModel = discovered
-            }
-        }
 
         do {
             let testPrompt = "Respond strictly with valid JSON: {\"status\": \"ok\"}"
@@ -544,7 +537,10 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
                     ["parts": [["text": prompt]]]
                 ],
                 "generationConfig": [
-                    "responseMimeType": "application/json"
+                    "responseMimeType": "application/json",
+                    "thinkingConfig": [
+                        "thinkingBudget": 0
+                    ]
                 ]
             ]
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -572,7 +568,7 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
 
-        request.timeoutInterval = 25.0
+        request.timeoutInterval = 60.0
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
