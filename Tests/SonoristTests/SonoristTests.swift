@@ -1346,6 +1346,20 @@ struct SonoristTestsRunner {
             guard result.language == "Bengali" && result.genre == "Spiritual" else {
                 throw TestError("Expected Bengali Spiritual for Hey Shokha, got \(result.language) - \(result.genre)")
             }
+
+            // 8. Test AI NEVER creates subfolders automatically
+            var cleanLib = AICuratedLibrary()
+            cleanLib.insert(trackId: "auto_1", language: "Hindi", genreName: "Pop & Dance", isCustom: false)
+            cleanLib.insert(trackId: "auto_2", language: "Hindi", genreName: "Melodic & Romance", isCustom: false)
+            guard let hindiCat = cleanLib.categories.first(where: { $0.language == "Hindi" }) else {
+                throw TestError("Expected Hindi category to be created")
+            }
+            guard hindiCat.genres.isEmpty else {
+                throw TestError("AI must NEVER create subfolders automatically, but found \(hindiCat.genres.count) subfolders!")
+            }
+            guard hindiCat.directTrackIds.count == 2 else {
+                throw TestError("Expected both tracks to lay directly in Hindi folder")
+            }
         }
         
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")

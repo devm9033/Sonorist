@@ -132,7 +132,8 @@ public struct AICuratedLibrary: Codable, Sendable {
     }
 
     /// Safely adds a track to a specific language.
-    /// If no matching user subfolder is specified, the track lays directly in the language folder (`directTrackIds`).
+    /// AI NEVER creates subfolders. Tracks ONLY go into user-created subfolders if they match.
+    /// Otherwise, tracks lay directly in the language folder (`directTrackIds`).
     public mutating func insert(
         trackId: String,
         language: String,
@@ -146,82 +147,59 @@ public struct AICuratedLibrary: Codable, Sendable {
         let isUnfiled = cleanGenre.isEmpty || cleanGenre.caseInsensitiveCompare("none") == .orderedSame || cleanGenre.caseInsensitiveCompare("other") == .orderedSame
 
         if let lIdx = categories.firstIndex(where: { $0.language.caseInsensitiveCompare(cleanLang) == .orderedSame }) {
-            if isUnfiled {
-                // Track lays directly in the language folder
+            // 1. If cleanGenre matches an existing user-created subfolder:
+            if !isUnfiled, let genreIdx = categories[lIdx].genres.firstIndex(where: { 
+                $0.name.caseInsensitiveCompare(cleanGenre) == .orderedSame ||
+                $0.aliases.contains(where: { $0.caseInsensitiveCompare(cleanGenre) == .orderedSame }) ||
+                ($0.name.localizedCaseInsensitiveContains("spiritual") && (
+                    cleanGenre.localizedCaseInsensitiveContains("spirit") ||
+                    cleanGenre.localizedCaseInsensitiveContains("devot") ||
+                    cleanGenre.localizedCaseInsensitiveContains("rabindra") ||
+                    cleanGenre.localizedCaseInsensitiveContains("bhajan") ||
+                    cleanGenre.localizedCaseInsensitiveContains("sacred") ||
+                    cleanGenre.localizedCaseInsensitiveContains("prayer")
+                )) ||
+                ($0.name.localizedCaseInsensitiveContains("rabindra") && (
+                    cleanGenre.localizedCaseInsensitiveContains("rabindra") ||
+                    cleanGenre.localizedCaseInsensitiveContains("tagore")
+                ))
+            }) {
+                categories[lIdx].directTrackIds.removeAll(where: { $0 == trackId })
+                if !categories[lIdx].genres[genreIdx].trackIds.contains(trackId) {
+                    categories[lIdx].genres[genreIdx].trackIds.append(trackId)
+                }
+            } else if isCustom && !isUnfiled {
+                // User explicitly created this subfolder:
+                categories[lIdx].directTrackIds.removeAll(where: { $0 == trackId })
+                let newGroup = AIGenreGroup(
+                    id: "\(cleanLang.lowercased())_\(categories[lIdx].genres.count + 1)_\(UUID().uuidString.prefix(4))",
+                    name: cleanGenre,
+                    icon: genreIcon,
+                    description: genreDescription,
+                    trackIds: [trackId],
+                    isCustom: true
+                )
+                categories[lIdx].genres.append(newGroup)
+            } else {
+                // Song does not match any user subfolder, or is unidentifiable:
+                // Lay directly in the language folder below the subfolders!
                 for gIdx in categories[lIdx].genres.indices {
                     categories[lIdx].genres[gIdx].trackIds.removeAll(where: { $0 == trackId })
                 }
                 if !categories[lIdx].directTrackIds.contains(trackId) {
                     categories[lIdx].directTrackIds.append(trackId)
                 }
-            } else {
-                // If subfolder matches by name or alias
-                if let genreIdx = categories[lIdx].genres.firstIndex(where: { $0.name.caseInsensitiveCompare(cleanGenre) == .orderedSame }) {
-                    categories[lIdx].directTrackIds.removeAll(where: { $0 == trackId })
-                    if !categories[lIdx].genres[genreIdx].trackIds.contains(trackId) {
-                        categories[lIdx].genres[genreIdx].trackIds.append(trackId)
-                    }
-                } else if let aliasIdx = categories[lIdx].genres.firstIndex(where: { g in
-                    g.aliases.contains(where: { $0.caseInsensitiveCompare(cleanGenre) == .orderedSame }) ||
-                    (g.name.localizedCaseInsensitiveContains("spiritual") && (
-                        cleanGenre.localizedCaseInsensitiveContains("spirit") ||
-                        cleanGenre.localizedCaseInsensitiveContains("devot") ||
-                        cleanGenre.localizedCaseInsensitiveContains("classic") ||
-                        cleanGenre.localizedCaseInsensitiveContains("heritage") ||
-                        cleanGenre.localizedCaseInsensitiveContains("bhajan") ||
-                        cleanGenre.localizedCaseInsensitiveContains("rabindra")
-                    ))
-                }) {
-                    categories[lIdx].directTrackIds.removeAll(where: { $0 == trackId })
-                    if !categories[lIdx].genres[aliasIdx].trackIds.contains(trackId) {
-                        categories[lIdx].genres[aliasIdx].trackIds.append(trackId)
-                    }
-                } else {
-                    // Subfolder doesn't exist yet:
-                    let hasCustomSubfolders = categories[lIdx].genres.contains(where: { $0.isCustom })
-                    if hasCustomSubfolders && !isCustom {
-                        // User has subfolders, but this song doesn't match any -> lays in main folder!
-                        if !categories[lIdx].directTrackIds.contains(trackId) {
-                            categories[lIdx].directTrackIds.append(trackId)
-                        }
-                    } else if categories[lIdx].genres.count < 5 || isCustom {
-                        categories[lIdx].directTrackIds.removeAll(where: { $0 == trackId })
-                        let newGroup = AIGenreGroup(
-                            id: "\(cleanLang.lowercased())_\(categories[lIdx].genres.count + 1)",
-                            name: cleanGenre,
-                            icon: genreIcon,
-                            description: genreDescription,
-                            trackIds: [trackId],
-                            isCustom: isCustom
-                        )
-                        categories[lIdx].genres.append(newGroup)
-                    } else {
-                        // Capped fallback
-                        if !categories[lIdx].genres[0].trackIds.contains(trackId) {
-                            categories[lIdx].genres[0].trackIds.append(trackId)
-                        }
-                    }
-                }
             }
         } else {
-            // Create new language folder
-            if isUnfiled {
-                let newCat = AILanguageCategory(
-                    id: cleanLang.lowercased(),
-                    language: cleanLang,
-                    icon: Self.defaultIcon(for: cleanLang),
-                    genres: [],
-                    directTrackIds: [trackId]
-                )
-                categories.append(newCat)
-            } else {
+            // New language category:
+            if isCustom && !isUnfiled {
                 let newGroup = AIGenreGroup(
                     id: "\(cleanLang.lowercased())_1",
                     name: cleanGenre,
                     icon: genreIcon,
                     description: genreDescription,
                     trackIds: [trackId],
-                    isCustom: isCustom
+                    isCustom: true
                 )
                 let newCat = AILanguageCategory(
                     id: cleanLang.lowercased(),
@@ -229,6 +207,16 @@ public struct AICuratedLibrary: Codable, Sendable {
                     icon: Self.defaultIcon(for: cleanLang),
                     genres: [newGroup],
                     directTrackIds: []
+                )
+                categories.append(newCat)
+            } else {
+                // AI classification creates the language folder ONLY, with all songs laying in directTrackIds!
+                let newCat = AILanguageCategory(
+                    id: cleanLang.lowercased(),
+                    language: cleanLang,
+                    icon: Self.defaultIcon(for: cleanLang),
+                    genres: [],
+                    directTrackIds: [trackId]
                 )
                 categories.append(newCat)
             }

@@ -313,6 +313,106 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
         saveLibrary()
     }
 
+    // MARK: - On-Demand Folder Sync & Routing
+
+    /// Called immediately after a user creates a new subfolder in a language.
+    /// Checks all songs currently in the language's direct list, matches them against the new folder,
+    /// moves matching songs into the folder, and leaves unidentifiable/unmatched songs below!
+    @MainActor
+    public func syncLanguageFolder(language: String, newSubfolderName: String) async {
+        let cleanLang = language.trimmingCharacters(in: .whitespacesAndNewlines).capitalized
+        guard let lIdx = curatedLibrary.categories.firstIndex(where: { $0.language.caseInsensitiveCompare(cleanLang) == .orderedSame }),
+              let subfolder = curatedLibrary.categories[lIdx].genres.first(where: { $0.name.caseInsensitiveCompare(newSubfolderName) == .orderedSame }) else {
+            return
+        }
+
+        let allCached = cacheManager.getAllCachedTracks()
+        let directTrackIds = curatedLibrary.categories[lIdx].directTrackIds
+        let candidateTracks = allCached.filter { directTrackIds.contains($0.id) }
+        guard !candidateTracks.isEmpty else { return }
+
+        self.isCurating = true
+        defer { self.isCurating = false }
+
+        var matchingTrackIds: [String] = []
+
+        // If AI is configured, query LLM for matching
+        if config.isConfigured {
+            do {
+                let trackPayload = candidateTracks.map { ["id": $0.id, "title": $0.title, "artist": $0.artist] }
+                let payloadData = try JSONSerialization.data(withJSONObject: trackPayload)
+                let jsonStr = String(data: payloadData, encoding: .utf8) ?? "[]"
+
+                let prompt = """
+                You are an expert musicologist and multilingual music cataloger.
+                Language: \(cleanLang)
+                Target Playlist Folder: "\(subfolder.name)" (\(subfolder.description))
+
+                For each of the following songs, determine if it belongs in the folder "\(subfolder.name)".
+                Guidelines:
+                - If the folder is "Spiritual" or devotional, any prayer, sacred, Christian worship/rock, or Rabindra Sangeet (such as "Majhe Majhe Tobo" or "Hey Shokha" by Arindom/Somlata, or "Lead Me" by Sanctus Real) belongs in this folder (matches = true).
+                - If the song does NOT clearly belong to "\(subfolder.name)", mark matches = false.
+
+                Songs to evaluate:
+                \(jsonStr)
+
+                Respond strictly in valid JSON matching this schema:
+                {
+                  "evaluations": [
+                    {
+                      "id": "track_id",
+                      "matches": true
+                    }
+                  ]
+                }
+                """
+
+                let raw = try await executeLLMRequest(prompt: prompt)
+                struct EvaluationItem: Codable {
+                    let id: String
+                    let matches: Bool
+                }
+                struct EvalWrapper: Codable {
+                    let evaluations: [EvaluationItem]
+                }
+                if let decoded = try? parseJSON(EvalWrapper.self, from: raw) {
+                    for item in decoded.evaluations where item.matches {
+                        matchingTrackIds.append(item.id)
+                    }
+                }
+            } catch {
+                #if DEBUG
+                print("[AIPlaylistEngine] AI syncLanguageFolder failed (\(error.localizedDescription)), falling back to local heuristics")
+                #endif
+            }
+        }
+
+        // If AI didn't match or was offline/failed, run local heuristic check
+        if matchingTrackIds.isEmpty {
+            for track in candidateTracks {
+                let classification = classifyTrackHeuristically(track)
+                if classification.genre.caseInsensitiveCompare(subfolder.name) == .orderedSame ||
+                   classification.genre.localizedCaseInsensitiveContains(subfolder.name) ||
+                   subfolder.name.localizedCaseInsensitiveContains(classification.genre) {
+                    matchingTrackIds.append(track.id)
+                }
+            }
+        }
+
+        // Move matched tracks into the subfolder; unmatched songs stay below in directTrackIds!
+        if !matchingTrackIds.isEmpty {
+            for tid in matchingTrackIds {
+                curatedLibrary.moveTrack(
+                    trackId: tid,
+                    in: cleanLang,
+                    fromGenre: "root",
+                    toGenre: subfolder.name
+                )
+            }
+            saveLibrary()
+        }
+    }
+
     @MainActor
     public func applyGlobalClassicsPreference(useSpiritual: Bool) {
         let targetName = useSpiritual ? "Spiritual" : "Classics & Heritage"
