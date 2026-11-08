@@ -439,6 +439,22 @@ public struct AILanguageDetailView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                if engine.isCurating && (engine.syncingLanguage?.caseInsensitiveCompare(currentCategory.language) == .orderedSame || engine.syncingLanguage == nil) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(FluidTheme.musicRed)
+                            .rotationEffect(.degrees(engine.isCurating ? 360 : 0))
+                            .animation(Animation.linear(duration: 1.0).repeatForever(autoreverses: false), value: engine.isCurating)
+                        Text("Syncing...")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(FluidTheme.musicRed)
+                    }
+                }
+            }
+        }
         .sheet(isPresented: $manager.isPresented) {
             AICustomizeFolderSheet()
         }
@@ -491,7 +507,9 @@ public struct AILanguageDetailView: View {
     // MARK: - User-Created Subfolder Row (Identical to Library's Playlists row)
 
     private func userFolderRow(for subfolder: AIGenreGroup) -> some View {
-        NavigationLink {
+        let isSyncing = engine.isCurating && (engine.syncingSubfolder?.caseInsensitiveCompare(subfolder.name) == .orderedSame || (engine.syncingSubfolder == nil && engine.syncingLanguage?.caseInsensitiveCompare(currentCategory.language) == .orderedSame))
+
+        return NavigationLink {
             AIGenreTrackListView(language: currentCategory.language, genre: subfolder)
         } label: {
             HStack(spacing: 14) {
@@ -500,9 +518,17 @@ public struct AILanguageDetailView: View {
                         .fill(categoryColor(for: currentCategory.language).opacity(0.15))
                         .frame(width: 44, height: 44)
 
-                    Image(systemName: subfolder.icon)
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundColor(categoryColor(for: currentCategory.language))
+                    if isSyncing {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundColor(categoryColor(for: currentCategory.language))
+                            .rotationEffect(.degrees(engine.isCurating ? 360 : 0))
+                            .animation(Animation.linear(duration: 1.0).repeatForever(autoreverses: false), value: engine.isCurating)
+                    } else {
+                        Image(systemName: subfolder.icon)
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundColor(categoryColor(for: currentCategory.language))
+                    }
                 }
 
                 VStack(alignment: .leading, spacing: 3) {
@@ -511,16 +537,37 @@ public struct AILanguageDetailView: View {
                         .foregroundColor(isLight ? .primary : .white)
 
                     let count = subfolder.trackIds.count
-                    Text("\(count) \(count == 1 ? "song" : "songs")")
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
+                    if isSyncing {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(FluidTheme.musicRed)
+                                .rotationEffect(.degrees(engine.isCurating ? 360 : 0))
+                                .animation(Animation.linear(duration: 1.0).repeatForever(autoreverses: false), value: engine.isCurating)
+                            Text("Syncing songs...")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(FluidTheme.musicRed)
+                        }
+                    } else {
+                        Text("\(count) \(count == 1 ? "song" : "songs")")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                    }
                 }
 
                 Spacer()
 
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.secondary.opacity(0.5))
+                if isSyncing {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(FluidTheme.musicRed)
+                        .rotationEffect(.degrees(engine.isCurating ? 360 : 0))
+                        .animation(Animation.linear(duration: 1.0).repeatForever(autoreverses: false), value: engine.isCurating)
+                } else {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.secondary.opacity(0.5))
+                }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
@@ -887,18 +934,38 @@ public struct AIGenreTrackListView: View {
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
                                 .fill(FluidTheme.musicRed.opacity(0.15))
                                 .frame(width: 56, height: 56)
-                            Image(systemName: currentGenre.icon)
-                                .font(.system(size: 26, weight: .bold))
-                                .foregroundColor(FluidTheme.musicRed)
+                            if engine.isCurating && engine.syncingSubfolder?.caseInsensitiveCompare(currentGenre.name) == .orderedSame {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                                    .font(.system(size: 26, weight: .bold))
+                                    .foregroundColor(FluidTheme.musicRed)
+                                    .rotationEffect(.degrees(engine.isCurating ? 360 : 0))
+                                    .animation(Animation.linear(duration: 1.0).repeatForever(autoreverses: false), value: engine.isCurating)
+                            } else {
+                                Image(systemName: currentGenre.icon)
+                                    .font(.system(size: 26, weight: .bold))
+                                    .foregroundColor(FluidTheme.musicRed)
+                            }
                         }
 
                         VStack(alignment: .leading, spacing: 4) {
                             Text(currentGenre.name)
                                 .font(.system(size: 18, weight: .bold))
                                 .foregroundColor(isLight ? .primary : .white)
-                            Text("\(language) • \(tracks.count) Songs")
-                                .font(.system(size: 13))
-                                .foregroundColor(.secondary)
+                            if engine.isCurating && engine.syncingSubfolder?.caseInsensitiveCompare(currentGenre.name) == .orderedSame {
+                                HStack(spacing: 5) {
+                                    Image(systemName: "arrow.triangle.2.circlepath")
+                                        .font(.system(size: 11, weight: .bold))
+                                        .rotationEffect(.degrees(engine.isCurating ? 360 : 0))
+                                        .animation(Animation.linear(duration: 1.0).repeatForever(autoreverses: false), value: engine.isCurating)
+                                    Text("Syncing songs with AI...")
+                                        .font(.system(size: 12, weight: .medium))
+                                }
+                                .foregroundColor(FluidTheme.musicRed)
+                            } else {
+                                Text("\(language) • \(tracks.count) Songs")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(.secondary)
+                            }
                         }
 
                         Spacer()
@@ -1071,6 +1138,22 @@ public struct AIGenreTrackListView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                if engine.isCurating && engine.syncingSubfolder?.caseInsensitiveCompare(currentGenre.name) == .orderedSame {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(FluidTheme.musicRed)
+                            .rotationEffect(.degrees(engine.isCurating ? 360 : 0))
+                            .animation(Animation.linear(duration: 1.0).repeatForever(autoreverses: false), value: engine.isCurating)
+                        Text("Syncing")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(FluidTheme.musicRed)
+                    }
+                }
+            }
+        }
     }
 }
 

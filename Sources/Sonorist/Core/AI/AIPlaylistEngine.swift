@@ -14,6 +14,8 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
     @Published public var curatedLibrary: AICuratedLibrary = AICuratedLibrary()
     @Published public var pendingQueue: [Track] = []
     @Published public var isCurating: Bool = false
+    @Published public var syncingLanguage: String? = nil
+    @Published public var syncingSubfolder: String? = nil
     @Published public var isProcessingPendingQueue: Bool = false
     @Published public var lastSyncError: String?
     @Published public var showingSettingsSheet: Bool = false
@@ -332,7 +334,13 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
         guard !candidateTracks.isEmpty else { return }
 
         self.isCurating = true
-        defer { self.isCurating = false }
+        self.syncingLanguage = cleanLang
+        self.syncingSubfolder = subfolder.name
+        defer {
+            self.isCurating = false
+            self.syncingLanguage = nil
+            self.syncingSubfolder = nil
+        }
 
         var matchingTrackIds: [String] = []
 
