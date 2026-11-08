@@ -154,7 +154,6 @@ public struct AICuratedLibrary: Codable, Sendable {
                 ($0.name.localizedCaseInsensitiveContains("spiritual") && (
                     cleanGenre.localizedCaseInsensitiveContains("spirit") ||
                     cleanGenre.localizedCaseInsensitiveContains("devot") ||
-                    cleanGenre.localizedCaseInsensitiveContains("rabindra") ||
                     cleanGenre.localizedCaseInsensitiveContains("bhajan") ||
                     cleanGenre.localizedCaseInsensitiveContains("sacred") ||
                     cleanGenre.localizedCaseInsensitiveContains("prayer")

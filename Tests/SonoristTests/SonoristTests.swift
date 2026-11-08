@@ -1384,7 +1384,7 @@ struct SonoristTestsRunner {
                 throw TestError("Expected both tracks to lay directly in Hindi folder")
             }
 
-            // 9. Test Rabindra Sangeet vs Spiritual differentiation
+            // 9. Test Rabindra Sangeet vs Spiritual differentiation & Multi-Folder Matching
             // Romantic Rabindra Sangeet must go to Rabindra Sangeet, NOT Spiritual!
             library.addCustomGenre(in: "Bengali", name: "Rabindra Sangeet")
             engine.curatedLibrary = library
@@ -1392,6 +1392,32 @@ struct SonoristTestsRunner {
             let loveResult = engine.classifyTrackHeuristically(romanticTrack)
             guard loveResult.genre == "Rabindra Sangeet" else {
                 throw TestError("Expected Rabindra Sangeet for Ami Chini Go Chini, got \(loveResult.genre)")
+            }
+
+            // 10. Multi-Folder Heuristic Matching:
+            // "Majhe Majhe Tobo" is a devotional Puja-parjaay Rabindra Sangeet:
+            // It MUST match BOTH "Rabindra Sangeet" AND "Spiritual"!
+            let subfolders = [
+                AIGenreGroup(id: "rs", name: "Rabindra Sangeet", isCustom: true),
+                AIGenreGroup(id: "sp", name: "Spiritual", isCustom: true)
+            ]
+            let devotionalTagore = Track(id: "dev_tagore", title: "Majhe Majhe Tobo", artist: "Arindom", durationSeconds: 215)
+            let matchedFolders = engine.evaluateSubfoldersForTrack(devotionalTagore, subfolders: subfolders)
+            guard matchedFolders.contains("Rabindra Sangeet") && matchedFolders.contains("Spiritual") else {
+                throw TestError("Expected Majhe Majhe Tobo to match BOTH Rabindra Sangeet and Spiritual, got \(matchedFolders)")
+            }
+
+            // Romantic Tagore song must match ONLY Rabindra Sangeet
+            let matchedRomantic = engine.evaluateSubfoldersForTrack(romanticTrack, subfolders: subfolders)
+            guard matchedRomantic.contains("Rabindra Sangeet") && !matchedRomantic.contains("Spiritual") else {
+                throw TestError("Expected Ami Chini Go Chini to match ONLY Rabindra Sangeet, got \(matchedRomantic)")
+            }
+
+            // Pure spiritual Christian song must match ONLY Spiritual
+            let christianTrack = Track(id: "christian_rock", title: "Lead Me", artist: "Sanctus Real", durationSeconds: 240)
+            let matchedChristian = engine.evaluateSubfoldersForTrack(christianTrack, subfolders: subfolders)
+            guard matchedChristian.contains("Spiritual") && !matchedChristian.contains("Rabindra Sangeet") else {
+                throw TestError("Expected Lead Me to match ONLY Spiritual, got \(matchedChristian)")
             }
         }
 

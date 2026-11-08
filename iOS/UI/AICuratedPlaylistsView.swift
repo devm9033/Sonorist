@@ -292,19 +292,28 @@ public struct AILanguageDetailView: View {
                         await engine.syncLanguageFolder(language: currentCategory.language)
                     }
                 } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                            .font(.system(size: 12, weight: .bold))
-                            .rotationEffect(.degrees(engine.isCurating ? 360 : 0))
-                            .animation(engine.isCurating ? Animation.linear(duration: 1.0).repeatForever(autoreverses: false) : .default, value: engine.isCurating)
-                        Text(engine.isCurating ? "Syncing..." : "Sync")
-                            .font(.system(size: 12, weight: .bold))
+                    HStack(spacing: 5) {
+                        if engine.isCurating {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: FluidTheme.musicRed))
+                                .scaleEffect(0.7)
+                                .frame(width: 14, height: 14)
+                            Text("Syncing...")
+                                .font(.system(size: 12, weight: .bold))
+                        } else {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .font(.system(size: 12, weight: .bold))
+                                .frame(width: 14, height: 14)
+                            Text("Sync")
+                                .font(.system(size: 12, weight: .bold))
+                        }
                     }
                     .foregroundColor(FluidTheme.musicRed)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
                     .background(FluidTheme.musicRed.opacity(0.12))
                     .clipShape(Capsule())
+                    .fixedSize()
                 }
                 .buttonStyle(PlainButtonStyle())
                 .disabled(engine.isCurating)
@@ -560,11 +569,10 @@ public struct AILanguageDetailView: View {
                 Spacer()
 
                 if isSyncing {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(FluidTheme.musicRed)
-                        .rotationEffect(.degrees(engine.isCurating ? 360 : 0))
-                        .animation(Animation.linear(duration: 1.0).repeatForever(autoreverses: false), value: engine.isCurating)
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: FluidTheme.musicRed))
+                        .scaleEffect(0.85)
+                        .frame(width: 16, height: 16)
                 } else {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 13, weight: .semibold))
@@ -1019,10 +1027,18 @@ public struct AIGenreTrackListView: View {
                             }
                         } label: {
                             HStack(spacing: 5) {
-                                Image(systemName: "arrow.triangle.2.circlepath")
-                                    .rotationEffect(.degrees(engine.isCurating ? 360 : 0))
-                                    .animation(engine.isCurating ? Animation.linear(duration: 1.0).repeatForever(autoreverses: false) : .default, value: engine.isCurating)
-                                Text(engine.isCurating ? "Syncing" : "Sync")
+                                if engine.isCurating {
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: FluidTheme.musicRed))
+                                        .scaleEffect(0.7)
+                                        .frame(width: 14, height: 14)
+                                    Text("Syncing...")
+                                } else {
+                                    Image(systemName: "arrow.triangle.2.circlepath")
+                                        .font(.system(size: 13, weight: .bold))
+                                        .frame(width: 14, height: 14)
+                                    Text("Sync")
+                                }
                             }
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundColor(FluidTheme.musicRed)
