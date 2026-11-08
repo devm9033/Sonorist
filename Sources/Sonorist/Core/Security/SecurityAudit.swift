@@ -20,7 +20,10 @@ public enum SecurityAudit {
         "163.com",
         "gvt1.com",
         "pollinations.ai",
-        "googleapis.com"
+        "googleapis.com",
+        "openrouter.ai",
+        "api.groq.com",
+        "api.openai.com"
     ]
     
     /// Validates an external URL for App Transport Security and trusted domain origin

@@ -311,6 +311,18 @@ public struct SettingsView: View {
                         }
                         .padding(14)
 
+                        if !AIProviderConfig.shared.selectedProvider.instructionsURL.isEmpty,
+                           let url = URL(string: AIProviderConfig.shared.selectedProvider.instructionsURL) {
+                            HStack {
+                                Link("Get Free \(AIProviderConfig.shared.selectedProvider.shortName) Key ↗", destination: url)
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundColor(FluidTheme.musicRed)
+                                Spacer()
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.bottom, 6)
+                        }
+
                         Divider().opacity(0.2)
 
                         HStack {

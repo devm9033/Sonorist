@@ -489,7 +489,7 @@ public struct AISettingsSheet: View {
                         if !config.selectedProvider.instructionsURL.isEmpty,
                            let url = URL(string: config.selectedProvider.instructionsURL) {
                             HStack {
-                                Link("Get Free \(config.selectedProvider.displayName) Key ↗", destination: url)
+                                Link("Get Free \(config.selectedProvider.shortName) Key ↗", destination: url)
                                     .font(.system(size: 12, weight: .medium))
                                     .foregroundColor(FluidTheme.musicRed)
                                 Spacer()

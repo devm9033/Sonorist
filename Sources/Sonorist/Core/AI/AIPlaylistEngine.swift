@@ -344,6 +344,7 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
         }
         var req = URLRequest(url: url)
         req.timeoutInterval = 10.0
+        req.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
         guard let (data, response) = try? await URLSession.shared.data(for: req),
               let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -365,7 +366,10 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
             "gemini-3.5-flash",
             "gemini-3.0-flash",
             "gemini-2.5-flash",
-            "gemini-2.0-flash"
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-exp",
+            "gemini-1.5-flash-latest",
+            "gemini-1.5-flash"
         ]
 
         for pref in preferences {
@@ -395,18 +399,26 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
         defer { self.testingConnection = false }
 
         let provider = config.selectedProvider
+        let apiKey = config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // For Gemini: proactively verify active models before testing
+        if provider == .gemini {
+            if let discovered = await discoverGeminiModel(apiKey: apiKey) {
+                config.activeGeminiModel = discovered
+            }
+        }
 
         do {
             let testPrompt = "Respond strictly with valid JSON: {\"status\": \"ok\"}"
-            _ = try await executeLLMRequest(prompt: testPrompt)
+            _ = try await executeLLMRequest(prompt: testPrompt, isTestPing: true)
             let currentModel = (provider == .gemini) ? config.activeGeminiModel : provider.defaultModel
             let successMsg = "✓ Connection Verified! \(provider.displayName) (\(currentModel)) is ready."
             self.connectionMessage = successMsg
             self.lastSyncError = nil
 
-            // If there were pending tracks waiting in the outbox, process them automatically!
+            // Auto-refresh the entire library so tracks immediately reorganize into their proper languages
             Task {
-                await self.processPendingQueueIfNeeded()
+                await self.curateEntireLibrary(force: true)
             }
             return (true, successMsg)
         } catch {
@@ -415,6 +427,8 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
             let errMsg: String
             if nsErr.code == 400 || nsErr.code == 401 || nsErr.code == 403 {
                 errMsg = "✗ Authentication Failed (\(nsErr.code)): \(detail)"
+            } else if (error as? URLError)?.code == .timedOut {
+                errMsg = "✗ Connection Timed Out: API endpoint did not respond. Check your network or try OpenRouter."
             } else if (error as? URLError)?.code == .notConnectedToInternet {
                 errMsg = "✗ Network Offline: Could not reach \(provider.displayName). Check your internet connection."
             } else {
@@ -592,7 +606,7 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
         }
     }
 
-    private func executeLLMRequest(prompt: String, retryCount: Int = 0) async throws -> String {
+    private func executeLLMRequest(prompt: String, isTestPing: Bool = false, retryCount: Int = 0) async throws -> String {
         let provider = config.selectedProvider
         let apiKey = config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -607,17 +621,25 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
             request = URLRequest(url: url)
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
+
+            var genConfig: [String: Any] = [
+                "responseMimeType": "application/json"
+            ]
+            if (currentModel.contains("3.") || currentModel.contains("3.8")) && retryCount == 0 {
+                genConfig["thinkingConfig"] = [
+                    "thinkingLevel": "low"
+                ]
+            }
 
             let body: [String: Any] = [
                 "contents": [
-                    ["parts": [["text": prompt]]]
-                ],
-                "generationConfig": [
-                    "responseMimeType": "application/json",
-                    "thinkingConfig": [
-                        "thinkingBudget": 0
+                    [
+                        "role": "user",
+                        "parts": [["text": prompt]]
                     ]
-                ]
+                ],
+                "generationConfig": genConfig
             ]
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
@@ -639,7 +661,7 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
             ]
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        case .groq, .openai, .ollama:
+        case .groq, .openai, .ollama, .openrouter:
             let endpointStr = provider == .ollama && !config.customEndpoint.isEmpty ? config.customEndpoint : provider.defaultEndpoint
             guard let url = URL(string: endpointStr) else {
                 throw URLError(.badURL)
@@ -650,9 +672,20 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
             if provider != .ollama {
                 request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
             }
+            if provider == .openrouter {
+                request.setValue("https://sonorist.app", forHTTPHeaderField: "HTTP-Referer")
+                request.setValue("Sonorist Music Player", forHTTPHeaderField: "X-Title")
+            }
+
+            let chosenModel: String
+            if provider == .openrouter && retryCount > 0 {
+                chosenModel = "meta-llama/llama-3.3-70b-instruct:free"
+            } else {
+                chosenModel = provider.defaultModel
+            }
 
             let body: [String: Any] = [
-                "model": provider.defaultModel,
+                "model": chosenModel,
                 "messages": [
                     ["role": "system", "content": "You are a music categorizer that outputs strictly valid JSON."],
                     ["role": "user", "content": prompt]
@@ -662,7 +695,7 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
 
-        request.timeoutInterval = 60.0
+        request.timeoutInterval = isTestPing ? 15.0 : 45.0
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
@@ -676,7 +709,7 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
             }
 
             // Auto-fallback and retry for Gemini if model not found or deprecated
-            if provider == .gemini && retryCount < 3 && (errDetail.contains("no longer available") || errDetail.contains("not found") || errDetail.contains("not supported") || (response as? HTTPURLResponse)?.statusCode == 404) {
+            if provider == .gemini && retryCount < 3 && (errDetail.contains("no longer available") || errDetail.contains("not found") || errDetail.contains("not supported") || errDetail.contains("thinkingConfig") || (response as? HTTPURLResponse)?.statusCode == 404 || (response as? HTTPURLResponse)?.statusCode == 400) {
                 // If Google explicitly suggests a model (e.g. "use models/gemini-3.8-flash")
                 if let regex = try? NSRegularExpression(pattern: "models/([a-zA-Z0-9.-]+)"),
                    let match = regex.matches(in: errDetail, range: NSRange(errDetail.startIndex..., in: errDetail)).last,
@@ -684,19 +717,25 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
                     let recommended = String(errDetail[range])
                     if recommended != currentModel {
                         config.activeGeminiModel = recommended
-                        return try await executeLLMRequest(prompt: prompt, retryCount: retryCount + 1)
+                        return try await executeLLMRequest(prompt: prompt, isTestPing: isTestPing, retryCount: retryCount + 1)
                     }
                 }
 
                 if currentModel != "gemini-3.8-flash" {
                     config.activeGeminiModel = "gemini-3.8-flash"
-                    return try await executeLLMRequest(prompt: prompt, retryCount: retryCount + 1)
+                    return try await executeLLMRequest(prompt: prompt, isTestPing: isTestPing, retryCount: retryCount + 1)
                 }
 
                 if let discovered = await discoverGeminiModel(apiKey: apiKey), discovered != currentModel {
                     config.activeGeminiModel = discovered
-                    return try await executeLLMRequest(prompt: prompt, retryCount: retryCount + 1)
+                    return try await executeLLMRequest(prompt: prompt, isTestPing: isTestPing, retryCount: retryCount + 1)
                 }
+            }
+
+            // Auto-fallback for OpenRouter free models if rate limited (429)
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 500
+            if provider == .openrouter && retryCount == 0 && (statusCode == 429 || errDetail.contains("rate limit") || errDetail.contains("credits")) {
+                return try await executeLLMRequest(prompt: prompt, isTestPing: isTestPing, retryCount: retryCount + 1)
             }
 
             throw NSError(domain: "AIPlaylistEngine", code: (response as? HTTPURLResponse)?.statusCode ?? 500, userInfo: [NSLocalizedDescriptionKey: errDetail])
