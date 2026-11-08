@@ -644,21 +644,22 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
             request.setValue("https://sonorist.app", forHTTPHeaderField: "HTTP-Referer")
             request.setValue("Sonorist Music Player", forHTTPHeaderField: "X-Title")
 
-            // Multi-model auto-routing across OpenRouter free tier
-            let body: [String: Any] = [
+            // Multi-model auto-routing across OpenRouter free tier (OpenRouter requires 3 items or fewer in 'models')
+            var body: [String: Any] = [
                 "model": "openrouter/free",
                 "models": [
                     "openrouter/free",
                     "meta-llama/llama-3.3-70b-instruct:free",
-                    "deepseek/deepseek-r1:free",
-                    "qwen/qwen-2.5-72b-instruct:free"
+                    "deepseek/deepseek-r1:free"
                 ],
                 "messages": [
                     ["role": "system", "content": "You are a music categorizer that outputs strictly valid JSON."],
                     ["role": "user", "content": prompt]
-                ],
-                "response_format": ["type": "json_object"]
+                ]
             ]
+            if retryCount == 0 {
+                body["response_format"] = ["type": "json_object"]
+            }
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
 
@@ -699,9 +700,9 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
                 }
             }
 
-            // Auto-fallback for OpenRouter free models if rate limited (429)
+            // Auto-fallback for OpenRouter free models if rate limited (429) or format issue (400)
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 500
-            if provider == .openrouter && retryCount == 0 && (statusCode == 429 || errDetail.contains("rate limit") || errDetail.contains("credits")) {
+            if provider == .openrouter && retryCount == 0 && (statusCode == 429 || statusCode == 400 || errDetail.contains("rate limit") || errDetail.contains("credits") || errDetail.contains("response_format")) {
                 return try await executeLLMRequest(prompt: prompt, isTestPing: isTestPing, retryCount: retryCount + 1)
             }
 
