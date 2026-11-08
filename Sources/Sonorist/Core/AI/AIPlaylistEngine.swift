@@ -434,49 +434,54 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
     // MARK: - LLM API Integration
 
     public struct AISongClassification: Codable, Sendable {
+        public let whatIsThisSong: String?
         public let language: String
         public let genre: String
         public let icon: String
         public let description: String
 
-        public init(language: String, genre: String, icon: String, description: String) {
+        public init(language: String, genre: String, icon: String, description: String, whatIsThisSong: String? = nil) {
             self.language = language
             self.genre = genre
             self.icon = icon
             self.description = description
+            self.whatIsThisSong = whatIsThisSong
         }
     }
 
     private func querySingleTrackClassification(track: Track) async throws -> AISongClassification {
         let prompt = """
-        You are an expert multilingual musicologist and music cataloger.
-        Classify this song for an offline music player into its true native Language (e.g. Bengali, Hindi, English, Punjabi, Tamil, Telugu, Malayalam, Kannada, Urdu, Spanish, Korean, or Instrumental) and one of these 5 standard genres:
-        1. Pop & Dance
-        2. Melodic & Romance
-        3. Acoustic & Chill
-        4. Classics & Heritage
-        5. Energetic & Beats
-
+        You are an expert musicologist and multilingual music cataloger.
         Song Title: "\(track.title)"
         Artist: "\(track.artist)"
 
+        Analyze this song by carefully answering these three specific questions:
+        1. What exactly is this song by this artist? Describe its musical context, cultural origin, album, or soundtrack.
+        2. In which language is this song sung? (e.g. Bengali, Hindi, English, Punjabi, Tamil, Telugu, Malayalam, Kannada, Urdu, Spanish, Korean, or Instrumental).
+        3. Which musical genre does it belong to, chosen strictly from these 5 standard genres:
+           - Pop & Dance
+           - Melodic & Romance
+           - Acoustic & Chill
+           - Classics & Heritage
+           - Energetic & Beats
+
         CRITICAL LINGUISTIC RULES:
-        - Identify the true native language of the song.
-        - Many Indian and international songs have their titles and artist names transliterated into the English / Roman alphabet.
-        - NEVER classify an Indian song as "English" simply because its title or artist is written using English letters!
+        - Check the artist and song title carefully.
+        - Many Indian songs have their titles and artist names transliterated into English/Latin letters.
+        - NEVER classify an Indian song as "English" simply because its title or artist is written in the Roman alphabet!
         - Examples:
-          * "Majhe Majhe Tobo" or "Shraboner Dharar Moto" or "Hey Shokha" by Arindom / Mekhla / Somlata -> MUST be "Bengali".
-          * "Destiny - Mann Atkeya" by Shashwat Sachdev -> MUST be "Hindi" ("Mann Atkeya" is Hindi; "Destiny" is an English prefix).
-          * "Kesariya" or "Chaleya" by Arijit Singh -> MUST be "Hindi".
-          * "Shape of You" by Ed Sheeran -> MUST be "English".
-          * "Lead Me" by Sanctus Real -> MUST be "English".
+          * "Majhe Majhe Tobo" by Arindom: Exactly Rabindra Sangeet -> Language MUST be "Bengali", Genre: "Melodic & Romance".
+          * "Destiny - Mann Atkeya" by Shashwat Sachdev: Hindi romantic ballad -> Language MUST be "Hindi", Genre: "Melodic & Romance".
+          * "Shape of You" by Ed Sheeran: British pop hit -> Language MUST be "English", Genre: "Pop & Dance".
+          * "Lead Me" by Sanctus Real: Christian rock / acoustic ballad -> Language MUST be "English", Genre: "Acoustic & Chill".
 
         Respond strictly in valid JSON matching this schema:
         {
+          "whatIsThisSong": "State what exactly this song is by this artist",
           "language": "LanguageName",
           "genre": "GenreName",
           "icon": "music.mic",
-          "description": "Short description"
+          "description": "Short 1-line description"
         }
         """
 
@@ -490,59 +495,101 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
         let jsonStr = String(data: payloadData, encoding: .utf8) ?? "[]"
 
         let prompt = """
-        You are an expert multilingual musicologist and music cataloger.
-        Given this list of offline songs, organize them into a clean folder hierarchy:
-        1. Primary Language: Bengali (Bangla), Hindi, English, Punjabi, Tamil, Telugu, Malayalam, Kannada, Urdu, Spanish, Korean, or Instrumental.
-        2. Within each language, strictly limit to at most 4 to 5 standard genres:
-           - 'Pop & Dance'
-           - 'Melodic & Romance'
-           - 'Acoustic & Chill'
-           - 'Classics & Heritage'
-           - 'Energetic & Beats'
+        You are an expert musicologist and multilingual music cataloger.
+        Examine this list of songs by checking each song's name and artist carefully.
+        For each song, answer:
+        1. What exactly is this song by this artist? (Origin, film/album, background).
+        2. In which language is this song sung? (e.g. Bengali, Hindi, English, Punjabi, Tamil, Telugu, Malayalam, Kannada, Urdu, Spanish, Korean, or Instrumental).
+        3. Which musical genre does it belong to, chosen strictly from these 5 standard genres:
+           - Pop & Dance
+           - Melodic & Romance
+           - Acoustic & Chill
+           - Classics & Heritage
+           - Energetic & Beats
 
-        CRITICAL LINGUISTIC RULES FOR REGIONAL & INDIAN SONGS:
-        - Many Indian songs have titles and artist names transliterated into the Latin/English alphabet.
+        CRITICAL LINGUISTIC RULES:
+        - Check the artist and song title carefully.
+        - Many Indian and international tracks have their titles and artist names transliterated into the Latin/English alphabet.
         - DO NOT classify a track as "English" merely because its title or artist name is written using English letters!
         - Key examples:
-          * "Majhe Majhe Tobo" by Arindom -> Language MUST be "Bengali".
-          * "Shraboner Dharar Moto" by Mekhla Dasgupta -> Language MUST be "Bengali".
-          * "Hey Shokha" by Somlata Acharyya Chowdhury -> Language MUST be "Bengali".
-          * "Destiny - Mann Atkeya" by Shashwat Sachdev -> Language MUST be "Hindi" ("Mann Atkeya" is Hindi; do not let "Destiny" fool you into English).
-          * "Shape of You" by Ed Sheeran, "Lead Me" by Sanctus Real -> Language MUST be "English".
-        - Ensure every track is placed under its authentic cultural language folder.
+          * "Majhe Majhe Tobo" by Arindom -> Exactly Rabindra Sangeet. Language MUST be "Bengali".
+          * "Shraboner Dharar Moto" by Mekhla Dasgupta -> Exactly Rabindra Sangeet. Language MUST be "Bengali".
+          * "Hey Shokha" by Somlata Acharyya Chowdhury -> Exactly Rabindra Sangeet. Language MUST be "Bengali".
+          * "Destiny - Mann Atkeya" by Shashwat Sachdev -> Bollywood Hindi romantic ballad. Language MUST be "Hindi" ("Mann Atkeya" is Hindi; do not let "Destiny" fool you into English).
+          * "Shape of You" by Ed Sheeran -> English pop song. Language MUST be "English".
+          * "Lead Me" by Sanctus Real -> English acoustic rock. Language MUST be "English".
 
-        List of tracks:
+        List of tracks to analyze:
         \(jsonStr)
 
-        Return ONLY a JSON object strictly matching this schema:
+        Return strictly a valid JSON object matching this schema:
         {
-          "categories": [
+          "songs": [
             {
-              "id": "bengali",
+              "id": "track_id_from_input",
+              "whatIsThisSong": "State what exactly this song is by this artist",
               "language": "Bengali",
-              "icon": "music.mic",
-              "genres": [
-                {
-                  "id": "bengali_melodic",
-                  "name": "Melodic & Romance",
-                  "icon": "heart.fill",
-                  "description": "Soulful Bengali melodies and romantic ballads",
-                  "trackIds": ["track_id_here"]
-                }
-              ]
+              "genre": "Melodic & Romance"
             }
           ]
         }
         """
 
         let rawResponse = try await executeLLMRequest(prompt: prompt)
-        
-        struct AIResponseWrapper: Codable {
+
+        struct AnalyzedTrack: Codable {
+            let id: String
+            let whatIsThisSong: String?
+            let language: String
+            let genre: String
+        }
+
+        struct SongsWrapper: Codable {
+            let songs: [AnalyzedTrack]
+        }
+
+        struct CategoriesWrapper: Codable {
             let categories: [AILanguageCategory]
         }
 
-        let wrapper = try parseJSON(AIResponseWrapper.self, from: rawResponse)
-        return AICuratedLibrary(lastUpdated: Date(), categories: wrapper.categories)
+        // 1. Preferred song-by-song analysis (most accurate, factual, and deterministic)
+        if let songsResult = try? parseJSON(SongsWrapper.self, from: rawResponse), !songsResult.songs.isEmpty {
+            var newLibrary = AICuratedLibrary()
+            for analyzed in songsResult.songs {
+                let meta = self.genreMetadata(for: analyzed.genre)
+                let cleanLang = analyzed.language.trimmingCharacters(in: .whitespacesAndNewlines).capitalized
+                newLibrary.insert(
+                    trackId: analyzed.id,
+                    language: cleanLang.isEmpty ? "Other" : cleanLang,
+                    genreName: meta.name,
+                    genreIcon: meta.icon,
+                    genreDescription: meta.description
+                )
+            }
+            return newLibrary
+        }
+
+        // 2. Compatibility fallback: older categories wrapper schema
+        if let catResult = try? parseJSON(CategoriesWrapper.self, from: rawResponse), !catResult.categories.isEmpty {
+            return AICuratedLibrary(lastUpdated: Date(), categories: catResult.categories)
+        }
+
+        throw NSError(domain: "AIPlaylistEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to parse music catalog analysis from AI"])
+    }
+
+    private func genreMetadata(for rawGenre: String) -> (name: String, icon: String, description: String) {
+        let g = rawGenre.lowercased()
+        if g.contains("dance") || g.contains("pop") {
+            return ("Pop & Dance", "flame.fill", "High-energy chart-toppers and dance beats")
+        } else if g.contains("acoustic") || g.contains("chill") {
+            return ("Acoustic & Chill", "moon.stars.fill", "Gentle acoustic, lo-fi, and midnight vibes")
+        } else if g.contains("classic") || g.contains("heritage") || g.contains("old") {
+            return ("Classics & Heritage", "sparkles", "Timeless classics and golden era favorites")
+        } else if g.contains("energetic") || g.contains("rap") || g.contains("beat") {
+            return ("Energetic & Beats", "bolt.fill", "Bass-heavy rap, beats, and motivational energy")
+        } else {
+            return ("Melodic & Romance", "heart.fill", "Soulful melodies and romantic tracks")
+        }
     }
 
     private func executeLLMRequest(prompt: String, retryCount: Int = 0) async throws -> String {
