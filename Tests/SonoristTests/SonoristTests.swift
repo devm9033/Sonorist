@@ -1182,11 +1182,17 @@ struct SonoristTestsRunner {
             let hindiTrack = Track(id: "h_trk", title: "Tujhe Dekha Toh", artist: "Kumar Sanu, Lata Mangeshkar", durationSeconds: 200)
             let popTrack = Track(id: "pop_trk", title: "Levitating Dance Remix", artist: "Dua Lipa", durationSeconds: 180)
             let punjabiTrack = Track(id: "pun_trk", title: "Lover", artist: "Diljit Dosanjh", durationSeconds: 190)
+            let bengaliTrack = Track(id: "beng_trk", title: "Majhe Majhe Tobo", artist: "Arindom", durationSeconds: 220)
+            let hindiTranslitTrack = Track(id: "h_translit", title: "Destiny - Mann Atkeya (From \"D...\")", artist: "Shashwat Sachdev", durationSeconds: 215)
+            let englishTrack = Track(id: "eng_trk", title: "Lead Me", artist: "Sanctus Real", durationSeconds: 240)
             
             // Run synchronous deterministic classification
             let hindiResult = engine.classifyTrackHeuristically(hindiTrack)
             let popResult = engine.classifyTrackHeuristically(popTrack)
             let punjabiResult = engine.classifyTrackHeuristically(punjabiTrack)
+            let bengaliResult = engine.classifyTrackHeuristically(bengaliTrack)
+            let hindiTranslitResult = engine.classifyTrackHeuristically(hindiTranslitTrack)
+            let englishResult = engine.classifyTrackHeuristically(englishTrack)
             
             guard hindiResult.language == "Hindi" else {
                 throw TestError("Expected Hindi language for Kumar Sanu, got \(hindiResult.language)")
@@ -1196,6 +1202,15 @@ struct SonoristTestsRunner {
             }
             guard punjabiResult.language == "Punjabi" else {
                 throw TestError("Expected Punjabi language for Diljit Dosanjh, got \(punjabiResult.language)")
+            }
+            guard bengaliResult.language == "Bengali" else {
+                throw TestError("Expected Bengali language for Majhe Majhe Tobo by Arindom, got \(bengaliResult.language)")
+            }
+            guard hindiTranslitResult.language == "Hindi" else {
+                throw TestError("Expected Hindi language for Destiny - Mann Atkeya, got \(hindiTranslitResult.language)")
+            }
+            guard englishResult.language == "English" else {
+                throw TestError("Expected English language for Lead Me by Sanctus Real, got \(englishResult.language)")
             }
         }
         

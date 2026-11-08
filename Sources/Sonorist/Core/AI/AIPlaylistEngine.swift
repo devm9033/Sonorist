@@ -449,22 +449,34 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
 
     private func querySingleTrackClassification(track: Track) async throws -> AISongClassification {
         let prompt = """
-        Classify this song for an offline music player into a primary Language (e.g. Hindi, English, Punjabi, Instrumental) and one of these 5 standard genres:
+        You are an expert multilingual musicologist and music cataloger.
+        Classify this song for an offline music player into its true native Language (e.g. Bengali, Hindi, English, Punjabi, Tamil, Telugu, Malayalam, Kannada, Urdu, Spanish, Korean, or Instrumental) and one of these 5 standard genres:
         1. Pop & Dance
         2. Melodic & Romance
         3. Acoustic & Chill
         4. Classics & Heritage
-        5. Energetic & Rap
+        5. Energetic & Beats
 
         Song Title: "\(track.title)"
         Artist: "\(track.artist)"
+
+        CRITICAL LINGUISTIC RULES:
+        - Identify the true native language of the song.
+        - Many Indian and international songs have their titles and artist names transliterated into the English / Roman alphabet.
+        - NEVER classify an Indian song as "English" simply because its title or artist is written using English letters!
+        - Examples:
+          * "Majhe Majhe Tobo" or "Shraboner Dharar Moto" or "Hey Shokha" by Arindom / Mekhla / Somlata -> MUST be "Bengali".
+          * "Destiny - Mann Atkeya" by Shashwat Sachdev -> MUST be "Hindi" ("Mann Atkeya" is Hindi; "Destiny" is an English prefix).
+          * "Kesariya" or "Chaleya" by Arijit Singh -> MUST be "Hindi".
+          * "Shape of You" by Ed Sheeran -> MUST be "English".
+          * "Lead Me" by Sanctus Real -> MUST be "English".
 
         Respond strictly in valid JSON matching this schema:
         {
           "language": "LanguageName",
           "genre": "GenreName",
-          "icon": "music.note",
-          "description": "Short 1-line description"
+          "icon": "music.mic",
+          "description": "Short description"
         }
         """
 
@@ -478,9 +490,26 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
         let jsonStr = String(data: payloadData, encoding: .utf8) ?? "[]"
 
         let prompt = """
-        You are an expert music curator. Given this list of offline songs, organize them into a clean folder hierarchy:
-        1. Primary Language (e.g. Hindi, English, Punjabi, Instrumental, Korean, Spanish).
-        2. Within each language, strictly limit to at most 4 to 5 standard genres (e.g. 'Pop & Dance', 'Melodic & Romance', 'Acoustic & Chill', 'Classics & Heritage', 'Energetic & Beats').
+        You are an expert multilingual musicologist and music cataloger.
+        Given this list of offline songs, organize them into a clean folder hierarchy:
+        1. Primary Language: Bengali (Bangla), Hindi, English, Punjabi, Tamil, Telugu, Malayalam, Kannada, Urdu, Spanish, Korean, or Instrumental.
+        2. Within each language, strictly limit to at most 4 to 5 standard genres:
+           - 'Pop & Dance'
+           - 'Melodic & Romance'
+           - 'Acoustic & Chill'
+           - 'Classics & Heritage'
+           - 'Energetic & Beats'
+
+        CRITICAL LINGUISTIC RULES FOR REGIONAL & INDIAN SONGS:
+        - Many Indian songs have titles and artist names transliterated into the Latin/English alphabet.
+        - DO NOT classify a track as "English" merely because its title or artist name is written using English letters!
+        - Key examples:
+          * "Majhe Majhe Tobo" by Arindom -> Language MUST be "Bengali".
+          * "Shraboner Dharar Moto" by Mekhla Dasgupta -> Language MUST be "Bengali".
+          * "Hey Shokha" by Somlata Acharyya Chowdhury -> Language MUST be "Bengali".
+          * "Destiny - Mann Atkeya" by Shashwat Sachdev -> Language MUST be "Hindi" ("Mann Atkeya" is Hindi; do not let "Destiny" fool you into English).
+          * "Shape of You" by Ed Sheeran, "Lead Me" by Sanctus Real -> Language MUST be "English".
+        - Ensure every track is placed under its authentic cultural language folder.
 
         List of tracks:
         \(jsonStr)
@@ -489,16 +518,16 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
         {
           "categories": [
             {
-              "id": "lang_id",
-              "language": "Hindi",
+              "id": "bengali",
+              "language": "Bengali",
               "icon": "music.mic",
               "genres": [
                 {
-                  "id": "genre_id",
+                  "id": "bengali_melodic",
                   "name": "Melodic & Romance",
                   "icon": "heart.fill",
-                  "description": "Soulful melodies and romantic ballads",
-                  "trackIds": ["id1", "id2"]
+                  "description": "Soulful Bengali melodies and romantic ballads",
+                  "trackIds": ["track_id_here"]
                 }
               ]
             }
@@ -677,6 +706,12 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
         }
         clean = clean.trimmingCharacters(in: .whitespacesAndNewlines)
 
+        // Resiliently isolate JSON substring if wrapped in conversational text
+        if let startIndex = clean.firstIndex(of: "{"),
+           let endIndex = clean.lastIndex(of: "}") {
+            clean = String(clean[startIndex...endIndex])
+        }
+
         guard let data = clean.data(using: .utf8) else {
             throw NSError(domain: "AIPlaylistEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Malformed text response"])
         }
@@ -707,14 +742,25 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
         var language = "English"
         var langIcon = "globe"
 
+        let bengaliKeywords = [
+            "arindom", "somlata", "mekhla dasgupta", "mekhla", "anupam roy", "rabindranath", "tagore", 
+            "rupam islam", "fossils", "nachiketa", "hemanta mukherjee", "babul supriyo", "monali thakur", 
+            "jeeth ganguly", "indraadip", "lopamudra", "cactus", "bhoomi", "anindya", "chandrabindoo", 
+            "subhamita", "srikanto", "raghab", "iman chakraborty", "shovan", "lagnajita", "debayan", 
+            "svf music", "svf", "tobo", "majhe majhe", "shraboner", "dharar moto", "hey shokha", "shokha", 
+            "bhalobashi", "amar mon", "ektara", "kolkata", "bristi", "nodir", "dujon", "mayabono", "bodhu", 
+            "alor gaan", "bengali", "bangla", "rabindra sangeet", "rabindra"
+        ]
+
         let hindiKeywords = [
-            "arijit", "shreya", "atif", "sonu nigam", "sunidhi", "kumar sanu", "udit narayan", "lata", "asha", 
-            "kishore", "rafi", "mukesh", "jagjit", "pritam", "badshah", "neha kakkar", "jubin", "armaan malik",
-            "darshan raval", "vishal", "shekhar", "sachin-jigar", "shankar mahadevan", "amit trivedi", "anuv jain",
-            "prateek kuhad", "b praak", "t-series", "t series", "bollywood", "filmi", "dil", "pyar", "ishq", "mohabbat",
-            "meri", "tera", "tum", "hum", "suno", "jaan", "sanam", "zindagi", "raat", "aankhen", "saath", "channa",
-            "chaleya", "kesariya", "apna bana le", "deva deva", "kabira", "kalank", "shayad", "raataan lambiyan",
-            "tujhe", "humsafar", "phir", "kabhi", "jeena", "dua karo", "khairiyat"
+            "shashwat sachdev", "mann atkeya", "atkeya", "sachdev", "arijit", "shreya", "atif", "sonu nigam", 
+            "sunidhi", "kumar sanu", "udit narayan", "lata", "asha", "kishore", "rafi", "mukesh", "jagjit", 
+            "pritam", "badshah", "neha kakkar", "jubin", "armaan malik", "darshan raval", "vishal", "shekhar", 
+            "sachin-jigar", "shankar mahadevan", "amit trivedi", "anuv jain", "prateek kuhad", "b praak", 
+            "t-series", "t series", "bollywood", "filmi", "dil ", "mera dil", "pyar", "ishq", "mohabbat", "meri", "tera", 
+            "tum", "hum", "suno", "jaan", "sanam", "zindagi", "raat", "aankhen", "saath", "channa", "chaleya", 
+            "kesariya", "apna bana le", "deva deva", "kabira", "kalank", "shayad", "raataan lambiyan", "tujhe", 
+            "humsafar", "phir", "kabhi", "jeena", "dua karo", "khairiyat", "deewani", "sufi", "qawwali"
         ]
 
         let englishArtists = [
@@ -722,7 +768,9 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
             "billie eilish", "ariana grande", "justin bieber", "post malone", "bruno mars", 
             "coldplay", "imagine dragons", "queen", "beatles", "michael jackson", "rihanna",
             "shakira", "adele", "maroon 5", "charlie puth", "shawn mendes", "olivia rodrigo",
-            "kendrick lamar", "travis scott", "kanye", "beyonce", "lady gaga", "katy perry"
+            "kendrick lamar", "travis scott", "kanye", "beyonce", "lady gaga", "katy perry",
+            "sanctus real", "linkin park", "marshmello", "chainsmokers", "alan walker", "avicii",
+            "sia", "halsey", "camila cabello", "selena gomez", "sam smith", "calvin harris"
         ]
 
         let punjabiKeywords = [
@@ -744,21 +792,27 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
             "ambient", "synthwave", "sleep", "meditation", "relaxing", "interstellar", "hans zimmer"
         ]
 
-        if englishArtists.contains(where: { combined.contains($0) }) {
-            language = "English"
-            langIcon = "globe"
-        } else if instrumentalKeywords.contains(where: { combined.contains($0) }) {
-            language = "Instrumental"
-            langIcon = "guitars"
+        if containsBengaliScript(combined) || bengaliKeywords.contains(where: { combined.contains($0) }) {
+            language = "Bengali"
+            langIcon = "music.mic"
         } else if punjabiKeywords.contains(where: { combined.contains($0) }) {
             language = "Punjabi"
             langIcon = "music.mic"
         } else if southIndianKeywords.contains(where: { combined.contains($0) }) {
             language = "South Indian"
             langIcon = "music.mic"
-        } else if hindiKeywords.contains(where: { combined.contains($0) }) || containsDevanagari(combined) {
+        } else if containsDevanagari(combined) || hindiKeywords.contains(where: { combined.contains($0) }) {
             language = "Hindi"
             langIcon = "music.mic"
+        } else if instrumentalKeywords.contains(where: { combined.contains($0) }) {
+            language = "Instrumental"
+            langIcon = "guitars"
+        } else if englishArtists.contains(where: { combined.contains($0) }) {
+            language = "English"
+            langIcon = "globe"
+        } else {
+            language = "English"
+            langIcon = "globe"
         }
 
         // 2. Standard 5 Genres determination
@@ -795,6 +849,13 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
     private func containsDevanagari(_ text: String) -> Bool {
         for scalar in text.unicodeScalars {
             if (0x0900...0x097F).contains(scalar.value) { return true }
+        }
+        return false
+    }
+
+    private func containsBengaliScript(_ text: String) -> Bool {
+        for scalar in text.unicodeScalars {
+            if (0x0980...0x09FF).contains(scalar.value) { return true }
         }
         return false
     }

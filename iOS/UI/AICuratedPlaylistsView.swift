@@ -143,6 +143,10 @@ public struct AICuratedPlaylistsFolderView: View {
         .listStyle(.insetGrouped)
         #endif
         .scrollContentBackground(.hidden)
+        .refreshable {
+            MobileHaptics.trigger(.medium)
+            await engine.curateEntireLibrary(force: true)
+        }
     }
 
     // MARK: - Zero-State Onboarding
@@ -197,8 +201,10 @@ public struct AICuratedPlaylistsFolderView: View {
     private func categoryColor(for language: String) -> Color {
         switch language.lowercased() {
         case "hindi": return Color.orange
+        case "bengali", "bangla": return Color.teal
         case "english": return Color.blue
         case "punjabi": return Color.yellow
+        case "south indian", "tamil", "telugu", "malayalam", "kannada": return Color.green
         case "instrumental": return Color.purple
         default: return FluidTheme.musicRed
         }
@@ -273,6 +279,10 @@ public struct AILanguageDetailView: View {
         .listStyle(.insetGrouped)
         #endif
         .scrollContentBackground(.hidden)
+        .refreshable {
+            MobileHaptics.trigger(.medium)
+            await AIPlaylistEngine.shared.curateEntireLibrary(force: true)
+        }
         .navigationTitle(category.language)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -437,6 +447,10 @@ public struct AIGenreTrackListView: View {
         .listStyle(.insetGrouped)
         #endif
         .scrollContentBackground(.hidden)
+        .refreshable {
+            MobileHaptics.trigger(.medium)
+            await AIPlaylistEngine.shared.curateEntireLibrary(force: true)
+        }
         .navigationTitle(genre.name)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
