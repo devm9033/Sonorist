@@ -39,6 +39,8 @@ public final class FolderCustomizationManager: ObservableObject {
 public struct AICuratedPlaylistsFolderView: View {
     @ObservedObject private var engine = AIPlaylistEngine.shared
     @ObservedObject private var config = AIProviderConfig.shared
+    @ObservedObject private var player = AudioPlayerEngine.shared
+    @ObservedObject private var coordinator = MobileNavigationCoordinator.shared
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
 
@@ -47,136 +49,325 @@ public struct AICuratedPlaylistsFolderView: View {
     public init() {}
 
     public var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.platformSystemBackground
-                    .ignoresSafeArea()
+        GeometryReader { rootGeo in
+            let screenHeight = rootGeo.size.height
 
-                if engine.curatedLibrary.categories.isEmpty && !engine.isCurating {
-                    emptyOnboardingView
-                } else {
-                    folderListView
-                }
-            }
-            .navigationTitle("Playlists")
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.large)
-            #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button {
-                        dismiss()
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 14, weight: .semibold))
-                            Text("Library")
-                                .font(.system(size: 16))
+            ZStack(alignment: .bottom) {
+                NavigationStack {
+                    ZStack {
+                        Color.platformSystemBackground
+                            .ignoresSafeArea()
+
+                        if engine.curatedLibrary.categories.isEmpty && !engine.isCurating {
+                            emptyOnboardingView
+                        } else {
+                            folderListView
                         }
-                        .foregroundColor(FluidTheme.musicRed)
                     }
-                }
-
-                ToolbarItemGroup(placement: .primaryAction) {
-                    // Manual Refresh Button
-                    Button {
-                        MobileHaptics.trigger(.medium)
-                        engine.spinRefresh = true
-                        Task {
-                            await engine.curateEntireLibrary(force: true)
-                            engine.spinRefresh = false
+                    .navigationTitle("Playlists")
+                    #if os(iOS)
+                    .navigationBarTitleDisplayMode(.large)
+                    #endif
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button {
+                                dismiss()
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "chevron.left")
+                                        .font(.system(size: 14, weight: .semibold))
+                                    Text("Library")
+                                        .font(.system(size: 16))
+                                }
+                                .foregroundColor(FluidTheme.musicRed)
+                            }
                         }
-                    } label: {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(FluidTheme.musicRed)
-                            .rotationEffect(.degrees(engine.spinRefresh || engine.isCurating ? 360 : 0))
-                            .animation(
-                                engine.spinRefresh || engine.isCurating
-                                    ? Animation.linear(duration: 1.0).repeatForever(autoreverses: false)
-                                    : .default,
-                                value: engine.spinRefresh || engine.isCurating
-                            )
-                    }
-                    .disabled(engine.isCurating)
 
-                    // Quick Settings Shortcut
-                    Button {
-                        MobileHaptics.trigger(.light)
-                        engine.showingSettingsSheet = true
-                    } label: {
-                        Image(systemName: "gearshape")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(FluidTheme.musicRed)
+                        ToolbarItemGroup(placement: .primaryAction) {
+                            // Manual Refresh Button
+                            Button {
+                                MobileHaptics.trigger(.medium)
+                                engine.spinRefresh = true
+                                Task {
+                                    await engine.curateEntireLibrary(force: true)
+                                    engine.spinRefresh = false
+                                }
+                            } label: {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundColor(FluidTheme.musicRed)
+                                    .rotationEffect(.degrees(engine.spinRefresh || engine.isCurating ? 360 : 0))
+                                    .animation(
+                                        engine.spinRefresh || engine.isCurating
+                                            ? Animation.linear(duration: 1.0).repeatForever(autoreverses: false)
+                                            : .default,
+                                        value: engine.spinRefresh || engine.isCurating
+                                    )
+                            }
+                            .disabled(engine.isCurating)
+
+                            // Quick Settings Shortcut
+                            Button {
+                                MobileHaptics.trigger(.light)
+                                engine.showingSettingsSheet = true
+                            } label: {
+                                Image(systemName: "gearshape")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundColor(FluidTheme.musicRed)
+                            }
+                        }
+                    }
+                    .sheet(isPresented: $engine.showingSettingsSheet) {
+                        AISettingsSheet()
+                    }
+                    .task {
+                        await engine.processPendingQueueIfNeeded()
                     }
                 }
+
+                // Docked MiniPlayer floating inside Playlist sheet
+                if !coordinator.isMiniPlayerDismissed && player.currentTrack != nil {
+                    MobileMiniPlayerView(screenHeight: screenHeight) {
+                        withAnimation(FluidTheme.fluidSpring) {
+                            coordinator.sheetDragOffset = 0
+                            coordinator.isNowPlayingExpanded = true
+                        }
+                    }
+                    .padding(.bottom, 6)
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .bottom).combined(with: .opacity),
+                        removal: .move(edge: .bottom).combined(with: .opacity)
+                    ))
+                    .zIndex(50)
+                }
+
+                // Full Now Playing Sheet (expands over Playlist sheet when tapped)
+                if coordinator.isNowPlayingExpanded || coordinator.isDraggingUpFromMiniPlayer {
+                    MobileNowPlayingSheet(isPresented: $coordinator.isNowPlayingExpanded)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .offset(y: coordinator.isDraggingUpFromMiniPlayer ? coordinator.sheetDragOffset : 0)
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .bottom),
+                            removal: .move(edge: .bottom).combined(with: .opacity)
+                        ))
+                        .zIndex(100)
+                }
             }
-            .sheet(isPresented: $engine.showingSettingsSheet) {
-                AISettingsSheet()
+            .animation(FluidTheme.fluidSpring, value: coordinator.isMiniPlayerDismissed)
+            .animation(FluidTheme.fluidSpring, value: player.currentTrack != nil)
+            .onChange(of: player.isPlaying) { _, isPlaying in
+                if isPlaying {
+                    coordinator.revealMiniPlayer()
+                }
             }
-            .task {
-                await engine.processPendingQueueIfNeeded()
+            .onChange(of: player.currentTrack?.id) { _, newId in
+                if newId != nil && (player.isPlaying || player.isBuffering) {
+                    coordinator.revealMiniPlayer()
+                }
             }
         }
     }
 
     // MARK: - Folder List View
 
-    private var folderListView: some View {
-        List {
-            Section("Languages (\(engine.curatedLibrary.categories.count))") {
-                ForEach(engine.curatedLibrary.categories) { category in
-                    NavigationLink {
-                        AILanguageDetailView(category: category)
-                    } label: {
-                        HStack(spacing: 14) {
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(categoryColor(for: category.language).opacity(0.15))
-                                    .frame(width: 44, height: 44)
-                                Image(systemName: category.icon)
-                                    .font(.system(size: 20, weight: .semibold))
-                                    .foregroundColor(categoryColor(for: category.language))
-                            }
+    private func orderedTracksFor(category: AILanguageCategory) -> [Track] {
+        let allCached = MediaCacheManager.shared.getAllCachedTracks()
+        let map = Dictionary(uniqueKeysWithValues: allCached.map { ($0.id, $0) })
+        var ordered: [Track] = []
+        var seen = Set<String>()
 
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(category.language)
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundColor(isLight ? .primary : .white)
-                                
-                                let genresSummary = category.genres.map { $0.name }.joined(separator: " • ")
-                                Text(genresSummary)
-                                    .font(.system(size: 12))
-                                    .foregroundColor(.secondary)
-                                    .lineLimit(1)
-                            }
-
-                            Spacer()
-
-                            Text("\(category.totalTrackCount)")
-                                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                                .foregroundColor(.secondary)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .background(Color.primary.opacity(0.06))
-                                .clipShape(Capsule())
-                        }
-                        .padding(.vertical, 4)
-                    }
-                    .listRowBackground(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(isLight ? Color.white : Color.platformSecondarySystemBackground)
-                    )
+        for subfolder in category.genres {
+            for id in subfolder.trackIds {
+                if !seen.contains(id), let trk = map[id] {
+                    seen.insert(id)
+                    ordered.append(trk)
                 }
             }
         }
-        #if os(iOS)
-        .listStyle(.insetGrouped)
-        #endif
-        .scrollContentBackground(.hidden)
-        .refreshable {
-            MobileHaptics.trigger(.medium)
-            await engine.curateEntireLibrary(force: true)
+
+        for id in category.directTrackIds {
+            if !seen.contains(id), let trk = map[id] {
+                seen.insert(id)
+                ordered.append(trk)
+            }
+        }
+
+        return ordered
+    }
+
+    private var folderListView: some View {
+        VStack(spacing: 0) {
+            // Subheader: Total songs across languages with Play All & Shuffle All
+            if engine.curatedLibrary.totalTrackCount > 0 {
+                HStack(spacing: 8) {
+                    Text("\(engine.curatedLibrary.totalTrackCount) \(engine.curatedLibrary.totalTrackCount == 1 ? "song" : "songs")")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.secondary)
+
+                    Spacer()
+
+                    // Play All (Plays in order across all languages and subfolders)
+                    Button {
+                        MobileHaptics.trigger(.medium)
+                        var allOrdered: [Track] = []
+                        for cat in engine.curatedLibrary.categories {
+                            allOrdered.append(contentsOf: orderedTracksFor(category: cat))
+                        }
+                        if let first = allOrdered.first {
+                            MobileNavigationCoordinator.shared.revealMiniPlayer()
+                            player.playFromOfflineLibrary(tracks: allOrdered, selectedTrack: first)
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 11, weight: .bold))
+                            Text("Play All")
+                                .font(.system(size: 12, weight: .bold))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(FluidTheme.musicRed)
+                        .clipShape(Capsule())
+                        .fixedSize()
+                    }
+                    .buttonStyle(PlainButtonStyle())
+
+                    // Shuffle All
+                    Button {
+                        MobileHaptics.trigger(.medium)
+                        let allTracks = engine.curatedLibrary.categories.flatMap { orderedTracksFor(category: $0) }.shuffled()
+                        if let first = allTracks.first {
+                            MobileNavigationCoordinator.shared.revealMiniPlayer()
+                            player.playFromOfflineLibrary(tracks: allTracks, selectedTrack: first)
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "shuffle")
+                                .font(.system(size: 12, weight: .bold))
+                            Text("Shuffle")
+                                .font(.system(size: 12, weight: .bold))
+                        }
+                        .foregroundColor(FluidTheme.musicRed)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(FluidTheme.musicRed.opacity(0.12))
+                        .clipShape(Capsule())
+                        .fixedSize()
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 6)
+                .padding(.bottom, 6)
+            }
+
+            List {
+                Section("Languages (\(engine.curatedLibrary.categories.count))") {
+                    ForEach(engine.curatedLibrary.categories) { category in
+                        NavigationLink {
+                            AILanguageDetailView(category: category)
+                        } label: {
+                            HStack(spacing: 14) {
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .fill(categoryColor(for: category.language).opacity(0.15))
+                                        .frame(width: 44, height: 44)
+                                    Image(systemName: category.icon)
+                                        .font(.system(size: 20, weight: .semibold))
+                                        .foregroundColor(categoryColor(for: category.language))
+                                }
+
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(category.language)
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundColor(isLight ? .primary : .white)
+                                    
+                                    let genresSummary = category.genres.map { $0.name }.joined(separator: " • ")
+                                    Text(genresSummary.isEmpty ? "All \(category.language) songs" : genresSummary)
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.secondary)
+                                        .lineLimit(1)
+                                }
+
+                                Spacer()
+
+                                Text("\(category.totalTrackCount)")
+                                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                    .foregroundColor(.secondary)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(Color.primary.opacity(0.06))
+                                    .clipShape(Capsule())
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        .listRowBackground(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(isLight ? Color.white : Color.platformSecondarySystemBackground)
+                        )
+                        .swipeActions(edge: .leading) {
+                            let catTracks = orderedTracksFor(category: category)
+                            if let first = catTracks.first {
+                                Button {
+                                    MobileHaptics.trigger(.medium)
+                                    MobileNavigationCoordinator.shared.revealMiniPlayer()
+                                    player.playFromOfflineLibrary(tracks: catTracks, selectedTrack: first)
+                                } label: {
+                                    Label("Play", systemImage: "play.fill")
+                                }
+                                .tint(FluidTheme.musicRed)
+
+                                Button {
+                                    MobileHaptics.trigger(.medium)
+                                    let shuffled = catTracks.shuffled()
+                                    if let sFirst = shuffled.first {
+                                        MobileNavigationCoordinator.shared.revealMiniPlayer()
+                                        player.playFromOfflineLibrary(tracks: shuffled, selectedTrack: sFirst)
+                                    }
+                                } label: {
+                                    Label("Shuffle", systemImage: "shuffle")
+                                }
+                                .tint(.orange)
+                            }
+                        }
+                        .contextMenu {
+                            let catTracks = orderedTracksFor(category: category)
+                            if let first = catTracks.first {
+                                Button {
+                                    MobileHaptics.trigger(.medium)
+                                    MobileNavigationCoordinator.shared.revealMiniPlayer()
+                                    player.playFromOfflineLibrary(tracks: catTracks, selectedTrack: first)
+                                } label: {
+                                    Label("Play All in \(category.language)", systemImage: "play.fill")
+                                }
+
+                                Button {
+                                    MobileHaptics.trigger(.medium)
+                                    let shuffled = catTracks.shuffled()
+                                    if let sFirst = shuffled.first {
+                                        MobileNavigationCoordinator.shared.revealMiniPlayer()
+                                        player.playFromOfflineLibrary(tracks: shuffled, selectedTrack: sFirst)
+                                    }
+                                } label: {
+                                    Label("Shuffle \(category.language)", systemImage: "shuffle")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            #if os(iOS)
+            .listStyle(.insetGrouped)
+            #endif
+            .scrollContentBackground(.hidden)
+            .safeAreaInset(edge: .bottom) {
+                Color.clear.frame(height: player.currentTrack != nil ? 76 : 20)
+            }
+            .refreshable {
+                MobileHaptics.trigger(.medium)
+                await engine.curateEntireLibrary(force: true)
+            }
         }
     }
 
@@ -275,9 +466,42 @@ public struct AILanguageDetailView: View {
         return allCached.filter { idSet.contains($0.id) }
     }
 
+    private var orderedTracks: [Track] {
+        let allCached = MediaCacheManager.shared.getAllCachedTracks()
+        let map = Dictionary(uniqueKeysWithValues: allCached.map { ($0.id, $0) })
+        var ordered: [Track] = []
+        var seen = Set<String>()
+
+        // 1. Songs in user subfolders in sequential order
+        for subfolder in currentCategory.genres {
+            for id in subfolder.trackIds {
+                if !seen.contains(id), let trk = map[id] {
+                    seen.insert(id)
+                    ordered.append(trk)
+                }
+            }
+        }
+
+        // 2. Unfiled songs laying directly below in this language
+        for id in currentCategory.directTrackIds {
+            if !seen.contains(id), let trk = map[id] {
+                seen.insert(id)
+                ordered.append(trk)
+            }
+        }
+
+        return ordered
+    }
+
+    private func tracksFor(subfolder: AIGenreGroup) -> [Track] {
+        let allCached = MediaCacheManager.shared.getAllCachedTracks()
+        let idSet = Set(subfolder.trackIds)
+        return allCached.filter { idSet.contains($0.id) }
+    }
+
     public var body: some View {
         VStack(spacing: 0) {
-            // Subheader: song count with Sync & Shuffle buttons
+            // Subheader: song count with Sync, Play & Shuffle buttons
             HStack(spacing: 8) {
                 Text("\(allTracks.count) \(allTracks.count == 1 ? "song" : "songs")")
                     .font(.system(size: 13, weight: .medium))
@@ -309,7 +533,7 @@ public struct AILanguageDetailView: View {
                         }
                     }
                     .foregroundColor(FluidTheme.musicRed)
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .background(FluidTheme.musicRed.opacity(0.12))
                     .clipShape(Capsule())
@@ -319,6 +543,31 @@ public struct AILanguageDetailView: View {
                 .disabled(engine.isCurating)
 
                 if !allTracks.isEmpty {
+                    // Sequential Play Button (1 by 1 across subfolders and direct tracks)
+                    Button {
+                        MobileHaptics.trigger(.medium)
+                        let tracks = orderedTracks
+                        if let first = tracks.first {
+                            MobileNavigationCoordinator.shared.revealMiniPlayer()
+                            player.playFromOfflineLibrary(tracks: tracks, selectedTrack: first)
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 11, weight: .bold))
+                            Text("Play")
+                                .font(.system(size: 12, weight: .bold))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(FluidTheme.musicRed)
+                        .clipShape(Capsule())
+                        .fixedSize()
+                    }
+                    .buttonStyle(PlainButtonStyle())
+
+                    // Shuffle Button (all tracks randomized)
                     Button {
                         MobileHaptics.trigger(.medium)
                         let tracks = allTracks.shuffled()
@@ -329,15 +578,16 @@ public struct AILanguageDetailView: View {
                     } label: {
                         HStack(spacing: 4) {
                             Image(systemName: "shuffle")
-                                .font(.system(size: 13, weight: .bold))
+                                .font(.system(size: 12, weight: .bold))
                             Text("Shuffle")
                                 .font(.system(size: 12, weight: .bold))
                         }
                         .foregroundColor(FluidTheme.musicRed)
-                        .padding(.horizontal, 12)
+                        .padding(.horizontal, 10)
                         .padding(.vertical, 6)
                         .background(FluidTheme.musicRed.opacity(0.12))
                         .clipShape(Capsule())
+                        .fixedSize()
                     }
                     .buttonStyle(PlainButtonStyle())
                 }
@@ -361,6 +611,31 @@ public struct AILanguageDetailView: View {
                             .listRowInsets(EdgeInsets(top: 3, leading: 16, bottom: 5, trailing: 16))
                             .listRowSeparator(.hidden)
                             .listRowBackground(Color.clear)
+                            .swipeActions(edge: .leading) {
+                                let subTracks = tracksFor(subfolder: subfolder)
+                                if let first = subTracks.first {
+                                    Button {
+                                        MobileHaptics.trigger(.medium)
+                                        MobileNavigationCoordinator.shared.revealMiniPlayer()
+                                        player.playFromOfflineLibrary(tracks: subTracks, selectedTrack: first)
+                                    } label: {
+                                        Label("Play", systemImage: "play.fill")
+                                    }
+                                    .tint(FluidTheme.musicRed)
+
+                                    Button {
+                                        MobileHaptics.trigger(.medium)
+                                        let shuffled = subTracks.shuffled()
+                                        if let sFirst = shuffled.first {
+                                            MobileNavigationCoordinator.shared.revealMiniPlayer()
+                                            player.playFromOfflineLibrary(tracks: shuffled, selectedTrack: sFirst)
+                                        }
+                                    } label: {
+                                        Label("Shuffle", systemImage: "shuffle")
+                                    }
+                                    .tint(.orange)
+                                }
+                            }
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                 Button {
                                     manager.presentEdit(language: currentCategory.language, genre: subfolder)
@@ -376,6 +651,28 @@ public struct AILanguageDetailView: View {
                                 }
                             }
                             .contextMenu {
+                                let subTracks = tracksFor(subfolder: subfolder)
+                                if let first = subTracks.first {
+                                    Button {
+                                        MobileHaptics.trigger(.medium)
+                                        MobileNavigationCoordinator.shared.revealMiniPlayer()
+                                        player.playFromOfflineLibrary(tracks: subTracks, selectedTrack: first)
+                                    } label: {
+                                        Label("Play Folder", systemImage: "play.fill")
+                                    }
+
+                                    Button {
+                                        MobileHaptics.trigger(.medium)
+                                        let shuffled = subTracks.shuffled()
+                                        if let sFirst = shuffled.first {
+                                            MobileNavigationCoordinator.shared.revealMiniPlayer()
+                                            player.playFromOfflineLibrary(tracks: shuffled, selectedTrack: sFirst)
+                                        }
+                                    } label: {
+                                        Label("Shuffle Folder", systemImage: "shuffle")
+                                    }
+                                }
+
                                 Button {
                                     manager.presentEdit(language: currentCategory.language, genre: subfolder)
                                 } label: {
@@ -467,6 +764,9 @@ public struct AILanguageDetailView: View {
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
+            .safeAreaInset(edge: .bottom) {
+                Color.clear.frame(height: player.currentTrack != nil ? 76 : 20)
+            }
         }
         .navigationTitle(currentCategory.language)
         #if os(iOS)
@@ -944,11 +1244,10 @@ public struct AIGenreTrackListView: View {
                                 .fill(FluidTheme.musicRed.opacity(0.15))
                                 .frame(width: 56, height: 56)
                             if engine.isCurating && engine.syncingSubfolder?.caseInsensitiveCompare(currentGenre.name) == .orderedSame {
-                                Image(systemName: "arrow.triangle.2.circlepath")
-                                    .font(.system(size: 26, weight: .bold))
-                                    .foregroundColor(FluidTheme.musicRed)
-                                    .rotationEffect(.degrees(engine.isCurating ? 360 : 0))
-                                    .animation(Animation.linear(duration: 1.0).repeatForever(autoreverses: false), value: engine.isCurating)
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: FluidTheme.musicRed))
+                                    .scaleEffect(1.2)
+                                    .frame(width: 56, height: 56)
                             } else {
                                 Image(systemName: currentGenre.icon)
                                     .font(.system(size: 26, weight: .bold))
@@ -962,10 +1261,10 @@ public struct AIGenreTrackListView: View {
                                 .foregroundColor(isLight ? .primary : .white)
                             if engine.isCurating && engine.syncingSubfolder?.caseInsensitiveCompare(currentGenre.name) == .orderedSame {
                                 HStack(spacing: 5) {
-                                    Image(systemName: "arrow.triangle.2.circlepath")
-                                        .font(.system(size: 11, weight: .bold))
-                                        .rotationEffect(.degrees(engine.isCurating ? 360 : 0))
-                                        .animation(Animation.linear(duration: 1.0).repeatForever(autoreverses: false), value: engine.isCurating)
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: FluidTheme.musicRed))
+                                        .scaleEffect(0.7)
+                                        .frame(width: 14, height: 14)
                                     Text("Syncing songs with AI...")
                                         .font(.system(size: 12, weight: .medium))
                                 }
@@ -1168,6 +1467,9 @@ public struct AIGenreTrackListView: View {
         .listStyle(.insetGrouped)
         #endif
         .scrollContentBackground(.hidden)
+        .safeAreaInset(edge: .bottom) {
+            Color.clear.frame(height: player.currentTrack != nil ? 76 : 20)
+        }
         .refreshable {
             MobileHaptics.trigger(.medium)
             await AIPlaylistEngine.shared.syncLanguageFolder(language: language, newSubfolderName: currentGenre.name)
