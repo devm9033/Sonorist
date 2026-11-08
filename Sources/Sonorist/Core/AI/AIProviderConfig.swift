@@ -3,10 +3,6 @@ import Foundation
 public enum AIProvider: String, Codable, CaseIterable, Identifiable, Sendable {
     case openrouter = "openrouter"
     case gemini = "gemini"
-    case groq = "groq"
-    case pollinations = "pollinations"
-    case openai = "openai"
-    case ollama = "ollama"
 
     public var id: String { rawValue }
 
@@ -14,10 +10,6 @@ public enum AIProvider: String, Codable, CaseIterable, Identifiable, Sendable {
         switch self {
         case .openrouter: return "OpenRouter (Recommended Free Key)"
         case .gemini: return "Google Gemini"
-        case .groq: return "Groq - Llama 3.3 (Free Key)"
-        case .pollinations: return "Pollinations AI (No Key / Public)"
-        case .openai: return "OpenAI ChatGPT"
-        case .ollama: return "Local Ollama on Mac"
         }
     }
 
@@ -25,21 +17,13 @@ public enum AIProvider: String, Codable, CaseIterable, Identifiable, Sendable {
         switch self {
         case .openrouter: return "OpenRouter"
         case .gemini: return "Google Gemini"
-        case .groq: return "Groq"
-        case .pollinations: return "Pollinations"
-        case .openai: return "OpenAI"
-        case .ollama: return "Ollama"
         }
     }
 
     public var defaultModel: String {
         switch self {
-        case .openrouter: return "google/gemini-2.0-flash-exp:free"
+        case .openrouter: return "openrouter/free"
         case .gemini: return "gemini-3.8-flash"
-        case .groq: return "llama-3.3-70b-versatile"
-        case .pollinations: return "openai"
-        case .openai: return "gpt-4o-mini"
-        case .ollama: return "llama3"
         }
     }
 
@@ -47,10 +31,6 @@ public enum AIProvider: String, Codable, CaseIterable, Identifiable, Sendable {
         switch self {
         case .openrouter: return "https://openrouter.ai/api/v1/chat/completions"
         case .gemini: return "https://generativelanguage.googleapis.com/v1beta/models"
-        case .groq: return "https://api.groq.com/openai/v1/chat/completions"
-        case .pollinations: return "https://text.pollinations.ai"
-        case .openai: return "https://api.openai.com/v1/chat/completions"
-        case .ollama: return "http://localhost:11434/v1/chat/completions"
         }
     }
 
@@ -58,18 +38,11 @@ public enum AIProvider: String, Codable, CaseIterable, Identifiable, Sendable {
         switch self {
         case .openrouter: return "https://openrouter.ai/keys"
         case .gemini: return "https://aistudio.google.com/app/apikey"
-        case .groq: return "https://console.groq.com/keys"
-        case .pollinations: return ""
-        case .openai: return "https://platform.openai.com/api-keys"
-        case .ollama: return "https://ollama.com"
         }
     }
 
     public var requiresApiKey: Bool {
-        switch self {
-        case .pollinations, .ollama: return false
-        case .openrouter, .gemini, .groq, .openai: return true
-        }
+        return true
     }
 }
 
@@ -124,8 +97,8 @@ public final class AIProviderConfig: ObservableObject, @unchecked Sendable {
     }
 
     private init() {
-        let provStr = defaults.string(forKey: keyProvider) ?? AIProvider.gemini.rawValue
-        self.selectedProvider = AIProvider(rawValue: provStr) ?? .gemini
+        let provStr = defaults.string(forKey: keyProvider) ?? AIProvider.openrouter.rawValue
+        self.selectedProvider = AIProvider(rawValue: provStr) ?? .openrouter
         self.apiKey = defaults.string(forKey: keyApiKey) ?? ""
         self.isAutoCurateOnDownloadEnabled = defaults.object(forKey: keyAutoDownload) as? Bool ?? true
         self.isAutoRetryPendingEnabled = defaults.object(forKey: keyAutoRetryPending) as? Bool ?? true

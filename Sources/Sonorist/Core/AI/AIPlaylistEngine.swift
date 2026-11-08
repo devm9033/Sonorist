@@ -399,20 +399,11 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
         defer { self.testingConnection = false }
 
         let provider = config.selectedProvider
-        let apiKey = config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // For Gemini: proactively verify active models before testing
-        if provider == .gemini {
-            if let discovered = await discoverGeminiModel(apiKey: apiKey) {
-                config.activeGeminiModel = discovered
-            }
-        }
 
         do {
             let testPrompt = "Respond strictly with valid JSON: {\"status\": \"ok\"}"
             _ = try await executeLLMRequest(prompt: testPrompt, isTestPing: true)
-            let currentModel = (provider == .gemini) ? config.activeGeminiModel : provider.defaultModel
-            let successMsg = "✓ Connection Verified! \(provider.displayName) (\(currentModel)) is ready."
+            let successMsg = "✓ Connection Verified! \(provider.displayName) is ready."
             self.connectionMessage = successMsg
             self.lastSyncError = nil
 
@@ -428,7 +419,7 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
             if nsErr.code == 400 || nsErr.code == 401 || nsErr.code == 403 {
                 errMsg = "✗ Authentication Failed (\(nsErr.code)): \(detail)"
             } else if (error as? URLError)?.code == .timedOut {
-                errMsg = "✗ Connection Timed Out: API endpoint did not respond. Check your network or try OpenRouter."
+                errMsg = "✗ Connection Timed Out: API endpoint did not respond. Check your network or switch to OpenRouter."
             } else if (error as? URLError)?.code == .notConnectedToInternet {
                 errMsg = "✗ Network Offline: Could not reach \(provider.displayName). Check your internet connection."
             } else {
@@ -621,12 +612,11 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
             request = URLRequest(url: url)
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
 
             var genConfig: [String: Any] = [
                 "responseMimeType": "application/json"
             ]
-            if (currentModel.contains("3.") || currentModel.contains("3.8")) && retryCount == 0 {
+            if !isTestPing && (currentModel.contains("3.") || currentModel.contains("3.8")) && retryCount == 0 {
                 genConfig["thinkingConfig"] = [
                     "thinkingLevel": "low"
                 ]
@@ -643,49 +633,26 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
             ]
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        case .pollinations:
-            guard let url = URL(string: "https://text.pollinations.ai") else {
+        case .openrouter:
+            guard let url = URL(string: provider.defaultEndpoint) else {
                 throw URLError(.badURL)
             }
             request = URLRequest(url: url)
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            request.setValue("https://sonorist.app", forHTTPHeaderField: "HTTP-Referer")
+            request.setValue("Sonorist Music Player", forHTTPHeaderField: "X-Title")
 
+            // Multi-model auto-routing across OpenRouter free tier
             let body: [String: Any] = [
-                "messages": [
-                    ["role": "system", "content": "You are a music categorizer that outputs strictly valid JSON."],
-                    ["role": "user", "content": prompt]
+                "model": "openrouter/free",
+                "models": [
+                    "openrouter/free",
+                    "meta-llama/llama-3.3-70b-instruct:free",
+                    "deepseek/deepseek-r1:free",
+                    "qwen/qwen-2.5-72b-instruct:free"
                 ],
-                "model": "openai",
-                "jsonMode": true
-            ]
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-        case .groq, .openai, .ollama, .openrouter:
-            let endpointStr = provider == .ollama && !config.customEndpoint.isEmpty ? config.customEndpoint : provider.defaultEndpoint
-            guard let url = URL(string: endpointStr) else {
-                throw URLError(.badURL)
-            }
-            request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            if provider != .ollama {
-                request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-            }
-            if provider == .openrouter {
-                request.setValue("https://sonorist.app", forHTTPHeaderField: "HTTP-Referer")
-                request.setValue("Sonorist Music Player", forHTTPHeaderField: "X-Title")
-            }
-
-            let chosenModel: String
-            if provider == .openrouter && retryCount > 0 {
-                chosenModel = "meta-llama/llama-3.3-70b-instruct:free"
-            } else {
-                chosenModel = provider.defaultModel
-            }
-
-            let body: [String: Any] = [
-                "model": chosenModel,
                 "messages": [
                     ["role": "system", "content": "You are a music categorizer that outputs strictly valid JSON."],
                     ["role": "user", "content": prompt]
@@ -751,22 +718,8 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
                let text = parts.first?["text"] as? String {
                 return text
             }
-        } else if provider == .pollinations {
-            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                if let choices = json["choices"] as? [[String: Any]],
-                   let first = choices.first,
-                   let message = first["message"] as? [String: Any],
-                   let text = message["content"] as? String {
-                    return text
-                }
-                if let directData = try? JSONSerialization.data(withJSONObject: json),
-                   let directText = String(data: directData, encoding: .utf8) {
-                    return directText
-                }
-            } else if let raw = String(data: data, encoding: .utf8), !raw.isEmpty {
-                return raw
-            }
         } else {
+            // OpenRouter (standard OpenAI format)
             if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let choices = json["choices"] as? [[String: Any]],
                let first = choices.first,

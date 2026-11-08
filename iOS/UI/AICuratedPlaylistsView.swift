@@ -482,32 +482,17 @@ public struct AISettingsSheet: View {
                     }
                     .pickerStyle(.menu)
 
-                    if config.selectedProvider.requiresApiKey {
-                        SecureField("API Key", text: $config.apiKey)
-                            .font(.system(size: 14, design: .monospaced))
+                    SecureField("API Key", text: $config.apiKey)
+                        .font(.system(size: 14, design: .monospaced))
 
-                        if !config.selectedProvider.instructionsURL.isEmpty,
-                           let url = URL(string: config.selectedProvider.instructionsURL) {
-                            HStack {
-                                Link("Get Free \(config.selectedProvider.shortName) Key ↗", destination: url)
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(FluidTheme.musicRed)
-                                Spacer()
-                            }
+                    if !config.selectedProvider.instructionsURL.isEmpty,
+                       let url = URL(string: config.selectedProvider.instructionsURL) {
+                        HStack {
+                            Link("Get Free \(config.selectedProvider.shortName) Key ↗", destination: url)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(FluidTheme.musicRed)
+                            Spacer()
                         }
-                    } else if config.selectedProvider == .ollama {
-                        TextField("Endpoint URL", text: $config.customEndpoint, prompt: Text("http://localhost:11434/v1/chat/completions"))
-                            .font(.system(size: 13, design: .monospaced))
-                    } else {
-                        HStack(spacing: 6) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundColor(.green)
-                                .font(.system(size: 13))
-                            Text("No sign-up or API key required. Works automatically.")
-                                .font(.system(size: 12))
-                                .foregroundColor(.secondary)
-                        }
-                        .padding(.vertical, 4)
                     }
 
                     // Test Connection Button
@@ -524,12 +509,12 @@ public struct AISettingsSheet: View {
                             } else {
                                 Image(systemName: "checkmark.shield.fill")
                             }
-                            Text(engine.testingConnection ? "Verifying with \(config.selectedProvider.displayName)..." : (config.selectedProvider.requiresApiKey ? "Test API Key & Verify Connection" : "Test Connection"))
+                            Text(engine.testingConnection ? "Verifying with \(config.selectedProvider.shortName)..." : "Test API Key & Verify Connection")
                                 .font(.system(size: 13, weight: .semibold))
                         }
                         .foregroundColor(FluidTheme.musicRed)
                     }
-                    .disabled(engine.testingConnection || (config.selectedProvider.requiresApiKey && config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
+                    .disabled(engine.testingConnection || config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                     if let msg = engine.connectionMessage {
                         HStack(alignment: .top, spacing: 6) {
