@@ -1,5 +1,39 @@
 import SwiftUI
 
+// MARK: - Folder Customization Observable Manager
+
+public final class FolderCustomizationManager: ObservableObject {
+    public static let shared = FolderCustomizationManager()
+
+    @Published public var isPresented: Bool = false
+    @Published public var targetLanguage: String = ""
+    @Published public var editingGenre: AIGenreGroup? = nil
+    @Published public var isNew: Bool = false
+    @Published public var folderName: String = "Spiritual"
+    @Published public var folderDescription: String = "Devotional, spiritual, hymns, prayers, and Rabindra Sangeet"
+    @Published public var selectedIcon: String = "sun.max.fill"
+
+    public func presentNew(language: String) {
+        self.targetLanguage = language
+        self.editingGenre = nil
+        self.isNew = true
+        self.folderName = "Spiritual"
+        self.folderDescription = "Devotional, spiritual, hymns, prayers, and Rabindra Sangeet"
+        self.selectedIcon = "sun.max.fill"
+        self.isPresented = true
+    }
+
+    public func presentEdit(language: String, genre: AIGenreGroup) {
+        self.targetLanguage = language
+        self.editingGenre = genre
+        self.isNew = false
+        self.folderName = genre.name
+        self.folderDescription = genre.description
+        self.selectedIcon = genre.icon
+        self.isPresented = true
+    }
+}
+
 // MARK: - Root Automated Playlists Folder View
 
 public struct AICuratedPlaylistsFolderView: View {
@@ -90,9 +124,6 @@ public struct AICuratedPlaylistsFolderView: View {
 
     private var folderListView: some View {
         List {
-            // Language Folders
-
-            // Language Folders
             Section("Languages (\(engine.curatedLibrary.categories.count))") {
                 ForEach(engine.curatedLibrary.categories) { category in
                     NavigationLink {
@@ -211,67 +242,119 @@ public struct AICuratedPlaylistsFolderView: View {
     }
 }
 
-// MARK: - Language Detail View (Max 5 Genres)
+// MARK: - Language Detail View (With Custom Playlist Controls)
 
 public struct AILanguageDetailView: View {
-    public let category: AILanguageCategory
+    public let initialCategory: AILanguageCategory
+    @ObservedObject private var engine = AIPlaylistEngine.shared
+    @ObservedObject private var manager = FolderCustomizationManager.shared
     @Environment(\.colorScheme) private var colorScheme
 
     private var isLight: Bool { colorScheme == .light }
 
     public init(category: AILanguageCategory) {
-        self.category = category
+        self.initialCategory = category
+    }
+
+    private var currentCategory: AILanguageCategory {
+        engine.curatedLibrary.categories.first(where: {
+            $0.language.caseInsensitiveCompare(initialCategory.language) == .orderedSame
+        }) ?? initialCategory
     }
 
     public var body: some View {
         List {
             Section {
-                ForEach(category.genres) { genre in
+                ForEach(currentCategory.genres) { genre in
                     NavigationLink {
-                        AIGenreTrackListView(language: category.language, genre: genre)
+                        AIGenreTrackListView(language: currentCategory.language, genre: genre)
                     } label: {
-                        HStack(spacing: 14) {
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(genreColor(for: genre.name).opacity(0.15))
-                                    .frame(width: 42, height: 42)
-                                Image(systemName: genre.icon)
-                                    .font(.system(size: 18, weight: .semibold))
-                                    .foregroundColor(genreColor(for: genre.name))
-                            }
-
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(genre.name)
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .foregroundColor(isLight ? .primary : .white)
-                                if !genre.description.isEmpty {
-                                    Text(genre.description)
-                                        .font(.system(size: 12))
-                                        .foregroundColor(.secondary)
-                                        .lineLimit(1)
-                                }
-                            }
-
-                            Spacer()
-
-                            Text("\(genre.trackIds.count)")
-                                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                                .foregroundColor(.secondary)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .background(Color.primary.opacity(0.06))
-                                .clipShape(Capsule())
-                        }
-                        .padding(.vertical, 4)
+                        AILanguageGenreRow(
+                            genre: genre,
+                            isLight: isLight,
+                            color: genreColor(for: genre.name)
+                        )
                     }
                     .listRowBackground(
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .fill(isLight ? Color.white : Color.platformSecondarySystemBackground)
                     )
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button {
+                            manager.presentEdit(language: currentCategory.language, genre: genre)
+                        } label: {
+                            Label("Customize", systemImage: "slider.horizontal.3")
+                        }
+                        .tint(.blue)
+
+                        if genre.isCustom || currentCategory.genres.count > 1 {
+                            Button(role: .destructive) {
+                                engine.deleteGenre(in: currentCategory.language, name: genre.name)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                    }
+                    .contextMenu {
+                        Button {
+                            manager.presentEdit(language: currentCategory.language, genre: genre)
+                        } label: {
+                            Label("Customize Folder...", systemImage: "slider.horizontal.3")
+                        }
+
+                        if genre.name == "Classics & Heritage" {
+                            Button {
+                                engine.renameGenre(
+                                    in: currentCategory.language,
+                                    oldName: "Classics & Heritage",
+                                    newName: "Spiritual",
+                                    newIcon: "sun.max.fill",
+                                    newDescription: "Devotional, spiritual, hymns, prayers, and Rabindra Sangeet"
+                                )
+                            } label: {
+                                Label("Change to 'Spiritual'", systemImage: "sparkles")
+                            }
+                        }
+
+                        if genre.isCustom || currentCategory.genres.count > 1 {
+                            Button(role: .destructive) {
+                                engine.deleteGenre(in: currentCategory.language, name: genre.name)
+                            } label: {
+                                Label("Delete Folder", systemImage: "trash")
+                            }
+                        }
+                    }
                 }
             } header: {
-                Text("\(category.language) Genres (Max 5)")
+                Text("\(currentCategory.language) Folders (\(currentCategory.genres.count))")
                     .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.secondary)
+            }
+
+            // Add Custom Folder Row
+            Section {
+                Button {
+                    MobileHaptics.trigger(.light)
+                    manager.presentNew(language: currentCategory.language)
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(FluidTheme.musicRed)
+                        Text("Add Playlist Folder")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(FluidTheme.musicRed)
+                        Spacer()
+                    }
+                    .padding(.vertical, 4)
+                }
+                .listRowBackground(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(isLight ? Color.white : Color.platformSecondarySystemBackground)
+                )
+            } footer: {
+                Text("Swipe left or tap and hold on any folder to customize its name, icon, and genre focus.")
+                    .font(.system(size: 11))
                     .foregroundColor(.secondary)
             }
         }
@@ -283,14 +366,51 @@ public struct AILanguageDetailView: View {
             MobileHaptics.trigger(.medium)
             await AIPlaylistEngine.shared.curateEntireLibrary(force: true)
         }
-        .navigationTitle(category.language)
+        .navigationTitle(currentCategory.language)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Button {
+                        manager.presentNew(language: currentCategory.language)
+                    } label: {
+                        Label("New Playlist Folder...", systemImage: "folder.badge.plus")
+                    }
+
+                    Button {
+                        engine.applyGlobalClassicsPreference(useSpiritual: true)
+                    } label: {
+                        Label("Make 'Spiritual' Folder", systemImage: "sparkles")
+                    }
+
+                    Divider()
+
+                    Button {
+                        Task {
+                            await engine.curateEntireLibrary(force: true)
+                        }
+                    } label: {
+                        Label("Re-Curate Songs into Folders", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.system(size: 16))
+                        .foregroundColor(FluidTheme.musicRed)
+                }
+            }
+        }
+        .sheet(isPresented: $manager.isPresented) {
+            AICustomizeFolderSheet()
+        }
     }
 
     private func genreColor(for name: String) -> Color {
         let n = name.lowercased()
+        if n.contains("spirit") || n.contains("devot") || n.contains("bhajan") || n.contains("sacred") || n.contains("rabindra") {
+            return Color.purple
+        }
         if n.contains("pop") || n.contains("dance") { return Color.pink }
         if n.contains("romance") || n.contains("melod") { return Color.red }
         if n.contains("chill") || n.contains("acoustic") { return Color.indigo }
@@ -300,30 +420,290 @@ public struct AILanguageDetailView: View {
     }
 }
 
+// MARK: - Row Subview for Clean Compiler Type Checking
+
+private struct AILanguageGenreRow: View {
+    let genre: AIGenreGroup
+    let isLight: Bool
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(color.opacity(0.15))
+                    .frame(width: 42, height: 42)
+                Image(systemName: genre.icon)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(color)
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(genre.name)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(isLight ? .primary : .white)
+
+                    if genre.isCustom {
+                        Text("CUSTOM")
+                            .font(.system(size: 9, weight: .bold, design: .rounded))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(FluidTheme.musicRed.opacity(0.15))
+                            .foregroundColor(FluidTheme.musicRed)
+                            .clipShape(Capsule())
+                    }
+                }
+
+                if !genre.description.isEmpty {
+                    Text(genre.description)
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer()
+
+            Text("\(genre.trackIds.count)")
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Color.primary.opacity(0.06))
+                .clipShape(Capsule())
+        }
+        .padding(.vertical, 4)
+    }
+}
+
 // Color amber compatibility
 private extension Color {
     static var amber: Color { Color(red: 0.95, green: 0.65, blue: 0.1) }
+}
+
+// MARK: - Folder Customization Sheet
+
+public struct AICustomizeFolderSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
+    @ObservedObject private var manager = FolderCustomizationManager.shared
+    @ObservedObject private var engine = AIPlaylistEngine.shared
+
+    private var isLight: Bool { colorScheme == .light }
+
+    private let availableIcons = [
+        "sun.max.fill", "sparkles", "hands.sparkles.fill", "heart.fill",
+        "flame.fill", "moon.stars.fill", "bolt.fill", "guitars",
+        "music.mic", "music.note", "star.fill", "leaf.fill", "cross.fill"
+    ]
+
+    private let presets: [(name: String, icon: String, description: String)] = [
+        ("Spiritual", "sun.max.fill", "Devotional, spiritual, hymns, prayers, and Rabindra Sangeet"),
+        ("Rabindra Sangeet", "sparkles", "Timeless Bengali songs and poetry of Rabindranath Tagore"),
+        ("Classics & Heritage", "sparkles", "Golden era classics and timeless favorites"),
+        ("Acoustic & Chill", "moon.stars.fill", "Gentle acoustic, lo-fi, and midnight vibes"),
+        ("Pop & Dance", "flame.fill", "High-energy chart-toppers and dance beats"),
+        ("Sufi & Ghazal", "moon.stars.fill", "Soulful Sufi poetry, ghazals, and meditative ragas")
+    ]
+
+    public init() {}
+
+    public var body: some View {
+        NavigationStack {
+            Form {
+                // Live Visual Preview Card
+                Section {
+                    HStack(spacing: 14) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(FluidTheme.musicRed.opacity(0.15))
+                                .frame(width: 52, height: 52)
+                            Image(systemName: manager.selectedIcon)
+                                .font(.system(size: 24, weight: .semibold))
+                                .foregroundColor(FluidTheme.musicRed)
+                        }
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(manager.folderName.isEmpty ? "Folder Name" : manager.folderName)
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(isLight ? .primary : .white)
+
+                            Text(manager.folderDescription.isEmpty ? "Tap a preset below or type description" : manager.folderDescription)
+                                .font(.system(size: 12))
+                                .foregroundColor(.secondary)
+                                .lineLimit(2)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                } header: {
+                    Text("Folder Preview")
+                }
+
+                // Name & Context
+                Section("Folder Details") {
+                    TextField("Folder Name (e.g. Spiritual)", text: $manager.folderName)
+                        .font(.system(size: 15))
+
+                    TextField("Description / Genre Context", text: $manager.folderDescription)
+                        .font(.system(size: 13))
+                }
+
+                // Quick Presets
+                Section("Quick Presets") {
+                    ForEach(presets, id: \.name) { preset in
+                        Button {
+                            MobileHaptics.trigger(.light)
+                            manager.folderName = preset.name
+                            manager.selectedIcon = preset.icon
+                            manager.folderDescription = preset.description
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: preset.icon)
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(FluidTheme.musicRed)
+                                    .frame(width: 20)
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(preset.name)
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(isLight ? .primary : .white)
+                                    Text(preset.description)
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.secondary)
+                                        .lineLimit(1)
+                                }
+                                Spacer()
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                }
+
+                // Icon Selection
+                Section("Folder Icon") {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(availableIcons, id: \.self) { icon in
+                                Button {
+                                    MobileHaptics.trigger(.light)
+                                    manager.selectedIcon = icon
+                                } label: {
+                                    ZStack {
+                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                            .fill(manager.selectedIcon == icon ? FluidTheme.musicRed : Color.primary.opacity(0.06))
+                                            .frame(width: 44, height: 44)
+                                        Image(systemName: icon)
+                                            .font(.system(size: 18, weight: .semibold))
+                                            .foregroundColor(manager.selectedIcon == icon ? .white : (isLight ? .primary : .white))
+                                    }
+                                }
+                            }
+                        }
+                        .padding(.vertical, 6)
+                    }
+                }
+
+                // Permanence Note
+                Section {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.seal.fill")
+                            .foregroundColor(.green)
+                            .font(.system(size: 14))
+                        Text("This folder is permanent and will stay even if empty. AI curation will automatically route matching songs into it.")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+            .navigationTitle(manager.isNew ? "New Folder" : "Customize Folder")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        manager.isPresented = false
+                    }
+                    .foregroundColor(FluidTheme.musicRed)
+                }
+
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        MobileHaptics.trigger(.medium)
+                        saveFolder()
+                        manager.isPresented = false
+                    }
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(FluidTheme.musicRed)
+                    .disabled(manager.folderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+    }
+
+    private func saveFolder() {
+        let cleanName = manager.folderName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanName.isEmpty else { return }
+
+        if manager.isNew || manager.editingGenre == nil {
+            engine.addCustomGenre(
+                in: manager.targetLanguage,
+                name: cleanName,
+                icon: manager.selectedIcon,
+                description: manager.folderDescription
+            )
+        } else if let eg = manager.editingGenre {
+            engine.renameGenre(
+                in: manager.targetLanguage,
+                oldName: eg.name,
+                newName: cleanName,
+                newIcon: manager.selectedIcon,
+                newDescription: manager.folderDescription
+            )
+        }
+    }
 }
 
 // MARK: - Genre Track List View
 
 public struct AIGenreTrackListView: View {
     public let language: String
-    public let genre: AIGenreGroup
+    public let initialGenre: AIGenreGroup
     @ObservedObject private var player = AudioPlayerEngine.shared
+    @ObservedObject private var engine = AIPlaylistEngine.shared
     @Environment(\.colorScheme) private var colorScheme
 
     private var isLight: Bool { colorScheme == .light }
 
+    private var currentCategory: AILanguageCategory? {
+        engine.curatedLibrary.categories.first(where: {
+            $0.language.caseInsensitiveCompare(language) == .orderedSame
+        })
+    }
+
+    private var currentGenre: AIGenreGroup {
+        currentCategory?.genres.first(where: {
+            $0.name.caseInsensitiveCompare(initialGenre.name) == .orderedSame
+        }) ?? initialGenre
+    }
+
+    private var otherGenres: [AIGenreGroup] {
+        (currentCategory?.genres ?? []).filter {
+            $0.name.caseInsensitiveCompare(currentGenre.name) != .orderedSame
+        }
+    }
+
     private var tracks: [Track] {
         let allCached = MediaCacheManager.shared.getAllCachedTracks()
-        let idSet = Set(genre.trackIds)
+        let idSet = Set(currentGenre.trackIds)
         return allCached.filter { idSet.contains($0.id) }
     }
 
     public init(language: String, genre: AIGenreGroup) {
         self.language = language
-        self.genre = genre
+        self.initialGenre = genre
     }
 
     public var body: some View {
@@ -336,13 +716,13 @@ public struct AIGenreTrackListView: View {
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
                                 .fill(FluidTheme.musicRed.opacity(0.15))
                                 .frame(width: 56, height: 56)
-                            Image(systemName: genre.icon)
+                            Image(systemName: currentGenre.icon)
                                 .font(.system(size: 26, weight: .bold))
                                 .foregroundColor(FluidTheme.musicRed)
                         }
 
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(genre.name)
+                            Text(currentGenre.name)
                                 .font(.system(size: 18, weight: .bold))
                                 .foregroundColor(isLight ? .primary : .white)
                             Text("\(language) • \(tracks.count) Songs")
@@ -440,6 +820,49 @@ public struct AIGenreTrackListView: View {
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
                             .fill(isLight ? Color.white : Color.platformSecondarySystemBackground)
                     )
+                    .swipeActions(edge: .leading) {
+                        if !otherGenres.isEmpty {
+                            Menu {
+                                ForEach(otherGenres) { dest in
+                                    Button {
+                                        MobileHaptics.trigger(.medium)
+                                        engine.moveTrack(
+                                            trackId: track.id,
+                                            in: language,
+                                            fromGenre: currentGenre.name,
+                                            toGenre: dest.name
+                                        )
+                                    } label: {
+                                        Label(dest.name, systemImage: dest.icon)
+                                    }
+                                }
+                            } label: {
+                                Label("Move", systemImage: "folder")
+                            }
+                            .tint(.blue)
+                        }
+                    }
+                    .contextMenu {
+                        if !otherGenres.isEmpty {
+                            Menu {
+                                ForEach(otherGenres) { dest in
+                                    Button {
+                                        MobileHaptics.trigger(.medium)
+                                        engine.moveTrack(
+                                            trackId: track.id,
+                                            in: language,
+                                            fromGenre: currentGenre.name,
+                                            toGenre: dest.name
+                                        )
+                                    } label: {
+                                        Label(dest.name, systemImage: dest.icon)
+                                    }
+                                }
+                            } label: {
+                                Label("Move to Folder...", systemImage: "folder")
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -451,7 +874,7 @@ public struct AIGenreTrackListView: View {
             MobileHaptics.trigger(.medium)
             await AIPlaylistEngine.shared.curateEntireLibrary(force: true)
         }
-        .navigationTitle(genre.name)
+        .navigationTitle(currentGenre.name)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
@@ -543,58 +966,75 @@ public struct AISettingsSheet: View {
                     Text("Enter your free key, then select from verified free models in the dropdown above.")
                 }
 
+                // Folder Customization Presets
+                Section("Playlist Customization") {
+                    Button {
+                        MobileHaptics.trigger(.medium)
+                        engine.applyGlobalClassicsPreference(useSpiritual: true)
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "sun.max.fill")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.purple)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Use 'Spiritual' Folder Across Languages")
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundColor(isLight ? .primary : .white)
+                                Text("Replaces 'Classics & Heritage' with 'Spiritual' so Rabindra Sangeet, bhajans, and hymns go into their own folder.")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+
+                    Button {
+                        MobileHaptics.trigger(.medium)
+                        engine.applyGlobalClassicsPreference(useSpiritual: false)
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.orange)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Reset to 'Classics & Heritage'")
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundColor(isLight ? .primary : .white)
+                                Text("Restores standard golden era classics title.")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+
                 // Automation Toggles
-                Section("Playlists") {
-                    Toggle("Organize on Download", isOn: $config.isAutoCurateOnDownloadEnabled)
-                        .tint(FluidTheme.musicRed)
-                    Text("Automatically adds new songs to genre folders when downloaded.")
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
-
-                    Toggle("Auto-Sync Pending Tracks", isOn: $config.isAutoRetryPendingEnabled)
-                        .tint(FluidTheme.musicRed)
-                    Text("Retries pending tracks from the outbox log automatically when connected to internet.")
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
-                }
-
-                // Outbox Sync Queue Section
-                Section("Outbox Sync Queue") {
-                    HStack {
-                        Text("Queue Status")
-                        Spacer()
-                        if engine.pendingQueue.isEmpty {
-                            Text("Clean (0 pending)")
+                Section("Automation") {
+                    Toggle(isOn: $config.isAutoCurateOnDownloadEnabled) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Auto-Organize Downloads")
+                                .font(.system(size: 14, weight: .medium))
+                            Text("Immediately organizes songs into language & genre folders upon download.")
+                                .font(.system(size: 11))
                                 .foregroundColor(.secondary)
-                        } else {
-                            Text("\(engine.pendingQueue.count) pending sync")
-                                .foregroundColor(FluidTheme.musicRed)
-                                .fontWeight(.medium)
                         }
                     }
+                    .tint(FluidTheme.musicRed)
 
-                    if !engine.pendingQueue.isEmpty {
-                        Button {
-                            MobileHaptics.trigger(.medium)
-                            Task {
-                                await engine.processPendingQueueIfNeeded()
-                            }
-                        } label: {
-                            HStack {
-                                if engine.isProcessingPendingQueue {
-                                    ProgressView()
-                                        .padding(.trailing, 6)
-                                }
-                                Text("Sync Pending Tracks Now")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundColor(FluidTheme.musicRed)
-                            }
+                    Toggle(isOn: $config.isAutoRetryPendingEnabled) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Event-Driven Queue Processing")
+                                .font(.system(size: 14, weight: .medium))
+                            Text("Retries pending tracks when internet restores.")
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
                         }
-                        .disabled(engine.isProcessingPendingQueue)
                     }
+                    .tint(FluidTheme.musicRed)
                 }
 
-                // Re-Analyze Action
+                // Manual Full Library Curation Action
                 Section {
                     Button {
                         MobileHaptics.trigger(.medium)
@@ -603,20 +1043,29 @@ public struct AISettingsSheet: View {
                         }
                     } label: {
                         HStack {
+                            Spacer()
                             if engine.isCurating {
                                 ProgressView()
+                                    .controlSize(.small)
                                     .padding(.trailing, 6)
                             }
-                            Text(engine.isCurating ? "Organizing Songs..." : "Re-Organize Offline Library")
-                                .font(.system(size: 15, weight: .semibold))
+                            Text(engine.isCurating ? "Organizing Music Library..." : "Curate Library Now")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(FluidTheme.musicRed)
+                            Spacer()
                         }
-                        .foregroundColor(FluidTheme.musicRed)
                     }
-                    .disabled(engine.isCurating || engine.testingConnection)
-
-                    Text("Re-classifies all downloaded songs into language and genre playlists.")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
+                    .disabled(engine.isCurating)
+                } footer: {
+                    if let err = engine.lastSyncError {
+                        Text("Notice: \(err)")
+                            .font(.system(size: 11))
+                            .foregroundColor(.orange)
+                    } else if let last = config.lastSyncDate {
+                        Text("Last organized: \(last.formatted(date: .abbreviated, time: .shortened))")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                    }
                 }
             }
             .navigationTitle("Playlist Settings")
