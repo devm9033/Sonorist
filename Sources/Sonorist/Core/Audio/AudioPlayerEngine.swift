@@ -76,7 +76,17 @@ public final class AudioPlayerEngine: ObservableObject {
     public static let trackDidCacheNotification = Notification.Name("SonoristTrackDidCacheNotification")
 
     // Playback state
-    @Published public var currentTrack: Track?
+    @Published public var currentTrack: Track? {
+        didSet {
+            if oldValue?.id != currentTrack?.id {
+                let isCached = currentTrack.map { MediaCacheManager.shared.isCached(videoId: $0.id) } ?? false
+                self.continuousListeningSeconds = 0.0
+                self.hasAutoSavedCurrentTrack = isCached
+                self.isAutoSavingTrack = false
+                self.autoSaveTask?.cancel()
+            }
+        }
+    }
     @Published public var isPlaying: Bool = false
     @Published public var isBuffering: Bool = false
     public var currentTime: Double {
@@ -321,6 +331,7 @@ public final class AudioPlayerEngine: ObservableObject {
     // Intentional Listening Gate State
     public var continuousListeningSeconds: Double = 0.0
     public var hasAutoSavedCurrentTrack: Bool = false
+    public var isAutoSavingTrack: Bool = false
     private var currentStreamRemoteURL: URL? = nil
     private var autoSaveTask: Task<Void, Never>? = nil
     private var stallRecoveryTask: Task<Void, Never>? = nil
@@ -1407,10 +1418,12 @@ public final class AudioPlayerEngine: ObservableObject {
                 if self.isPlaying {
                     ListeningAnalyticsManager.shared.recordListeningTime(seconds: 0.25, track: self.currentTrack)
 
-                    // Intentional Listening 15-second skip filter:
-                    if !self.hasAutoSavedCurrentTrack && self.currentTrack != nil {
+                    // Intentional Listening auto-cache filter (15-second skip gate):
+                    if !self.hasAutoSavedCurrentTrack && !self.isAutoSavingTrack && !self.isPlayingFromOfflineLibrary,
+                       let track = self.currentTrack, !track.id.hasPrefix("local_"), !self.cacheManager.isCached(videoId: track.id) {
                         self.continuousListeningSeconds += 0.25
-                        if self.continuousListeningSeconds >= 15.0 {
+                        let hasListenedEnough = self.continuousListeningSeconds >= 15.0 || (self.currentTime >= 15.0 && self.continuousListeningSeconds >= 5.0)
+                        if hasListenedEnough {
                             self.triggerAutoSaveForCurrentTrack()
                         }
                     }
@@ -2088,45 +2101,60 @@ public final class AudioPlayerEngine: ObservableObject {
             hasAutoSavedCurrentTrack = true
             return
         }
+        guard !isAutoSavingTrack else { return }
 
-        hasAutoSavedCurrentTrack = true
+        isAutoSavingTrack = true
         let trackToSave = track
-        let remoteURL = self.currentStreamRemoteURL
+        let existingRemoteURL = self.currentStreamRemoteURL
 
         autoSaveTask?.cancel()
         autoSaveTask = Task(priority: .utility) { [weak self] in
             guard let self = self else { return }
+            defer {
+                Task { @MainActor in
+                    self.isAutoSavingTrack = false
+                }
+            }
+
             do {
-                // 1. Fetch raw audio stream data
-                var fetchedData: Data? = nil
-                if let url = remoteURL, let safeURL = SecurityAudit.validateURL(url.absoluteString) {
-                    var request = URLRequest(url: safeURL)
-                    request.setValue("com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip", forHTTPHeaderField: "User-Agent")
-                    if let (data, response) = try? await URLSession.shared.data(for: request),
-                       let http = response as? HTTPURLResponse, (http.statusCode == 200 || http.statusCode == 206), data.count > 1024 {
-                        fetchedData = data
-                    } else if let (data, response) = try? await URLSession.shared.data(from: safeURL),
-                              let http = response as? HTTPURLResponse, (http.statusCode == 200 || http.statusCode == 206), data.count > 1024 {
-                        fetchedData = data
-                    }
-                }
+                // 1. Fetch raw audio stream data using streaming delegate
+                var audioData: Data? = nil
+                var formatBadge = trackToSave.audioFormat ?? "AAC"
 
-                if fetchedData == nil {
-                    let (streamURL, _) = try await InnerTubeClient.shared.resolveStreamURL(for: trackToSave.id)
-                    if let safeStream = SecurityAudit.validateURL(streamURL.absoluteString) {
-                        var request = URLRequest(url: safeStream)
-                        request.setValue("com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip", forHTTPHeaderField: "User-Agent")
-                        if let (data, response) = try? await URLSession.shared.data(for: request),
-                           let http = response as? HTTPURLResponse, (http.statusCode == 200 || http.statusCode == 206), data.count > 1024 {
-                            fetchedData = data
-                        } else if let (data, response) = try? await URLSession.shared.data(from: safeStream),
-                                  let http = response as? HTTPURLResponse, (http.statusCode == 200 || http.statusCode == 206), data.count > 1024 {
-                            fetchedData = data
+                // Attempt A: Stream from existing playback URL if available
+                if let url = existingRemoteURL, let safeURL = SecurityAudit.validateURL(url.absoluteString) {
+                    do {
+                        let data = try await self.performStreamingDownload(url: safeURL)
+                        if data.count > 1024 {
+                            audioData = data
                         }
+                    } catch {
+                        #if DEBUG
+                        print("[Auto-Cache]: Existing stream download failed (\(error.localizedDescription)). Resolving fresh stream...")
+                        #endif
                     }
                 }
 
-                guard let audioData = fetchedData, audioData.count > 1024 else { return }
+                // Attempt B: Resolve fresh unthrottled stream URL via InnerTube
+                if audioData == nil {
+                    let (freshURL, badge, _) = try await InnerTubeClient.shared.resolveStreamURL(for: trackToSave.id, preferredQuality: self.selectedAudioQuality)
+                    formatBadge = badge
+                    let data = try await self.performStreamingDownload(url: freshURL)
+                    if data.count > 1024 {
+                        audioData = data
+                    }
+                }
+
+                guard let finalAudioData = audioData, finalAudioData.count > 1024 else {
+                    #if DEBUG
+                    print("[Auto-Cache]: Audio stream fetch produced empty data for \(trackToSave.title)")
+                    #endif
+                    // Download failed: allow retry after 5 more seconds of active listening
+                    await MainActor.run {
+                        self.continuousListeningSeconds = 10.0
+                    }
+                    return
+                }
 
                 // 2. Fetch lyrics if not yet loaded
                 let lyrics = self.lyricLines.isEmpty ? await LRCLIBService.shared.fetchLyrics(for: trackToSave) : self.lyricLines
@@ -2138,24 +2166,57 @@ public final class AudioPlayerEngine: ObservableObject {
                 }
 
                 // 4. Pack and commit into compressed .sonorist bundle
+                var updatedTrack = trackToSave
+                updatedTrack.audioFormat = formatBadge
+                updatedTrack.isCached = true
+
                 self.cacheManager.saveBundle(
-                    track: trackToSave,
-                    audioData: audioData,
+                    track: updatedTrack,
+                    audioData: finalAudioData,
                     lyrics: lyrics,
                     artworkData: artworkData
                 )
 
-                // 5. Update UI state on MainActor
+                // 5. Success! Mark as auto-saved and synchronize UI state across the app
                 await MainActor.run {
+                    self.hasAutoSavedCurrentTrack = true
+
                     if self.currentTrack?.id == trackToSave.id {
                         self.currentTrack?.isCached = true
+                        self.currentTrack?.audioFormat = formatBadge
                     }
-                    NotificationCenter.default.post(name: Self.trackDidCacheNotification, object: trackToSave)
+
+                    for i in 0..<self.queue.count {
+                        if self.queue[i].id == trackToSave.id {
+                            self.queue[i].isCached = true
+                        }
+                    }
+                    for i in 0..<self.playHistory.count {
+                        if self.playHistory[i].id == trackToSave.id {
+                            self.playHistory[i].isCached = true
+                        }
+                    }
+                    for i in 0..<self.likedTracks.count {
+                        if self.likedTracks[i].id == trackToSave.id {
+                            self.likedTracks[i].isCached = true
+                        }
+                    }
+
+                    NotificationCenter.default.post(name: Self.trackDidCacheNotification, object: trackToSave.id)
+
+                    #if os(iOS)
+                    MobileToastManager.shared.show(message: "Saved to Offline Library", icon: "arrow.down.circle.fill")
+                    MobileHaptics.trigger(.light)
+                    #endif
                 }
             } catch {
                 #if DEBUG
                 print("[Auto-Cache Error]: \(error)")
                 #endif
+                // On failure, back off so it retries after 5 more seconds of active listening
+                await MainActor.run {
+                    self.continuousListeningSeconds = 10.0
+                }
             }
         }
     }
@@ -2173,20 +2234,28 @@ public final class AudioPlayerEngine: ObservableObject {
         }
     }
 
-    // MARK: - Explicit Track Download / Cache
+    // MARK: - Streaming Chunked Audio Downloader
 
     private final class TrackDownloadDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
-        private let onProgress: @Sendable (Double) -> Void
-        private let onCompletion: @Sendable (Data?, Error?) -> Void
+        weak var session: URLSession?
+        private let onProgress: (@Sendable (Double) -> Void)?
+        private let onCompletion: @Sendable (Result<Data, Error>) -> Void
         private var buffer = Data()
         private var expectedLength: Int64 = 0
+        private let lock = NSLock()
+        private var hasCompleted = false
 
-        init(onProgress: @escaping @Sendable (Double) -> Void, onCompletion: @escaping @Sendable (Data?, Error?) -> Void) {
+        init(onProgress: (@Sendable (Double) -> Void)?, onCompletion: @escaping @Sendable (Result<Data, Error>) -> Void) {
             self.onProgress = onProgress
             self.onCompletion = onCompletion
         }
 
         func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+            if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
+                completionHandler(.cancel)
+                complete(with: .failure(NSError(domain: "TrackDownload", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: "HTTP \(http.statusCode)"])))
+                return
+            }
             self.expectedLength = response.expectedContentLength
             if expectedLength > 0 {
                 buffer.reserveCapacity(min(Int(expectedLength), 50 * 1024 * 1024))
@@ -2198,18 +2267,69 @@ public final class AudioPlayerEngine: ObservableObject {
             buffer.append(data)
             if expectedLength > 0 {
                 let ratio = Double(buffer.count) / Double(expectedLength)
-                onProgress(min(0.99, ratio))
+                onProgress?(min(0.99, ratio))
             }
         }
 
         func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
             if let error = error {
-                onCompletion(nil, error)
+                complete(with: .failure(error))
+            } else if buffer.count < 1024 {
+                complete(with: .failure(NSError(domain: "TrackDownload", code: -1, userInfo: [NSLocalizedDescriptionKey: "Downloaded audio stream is truncated or empty (\(buffer.count) bytes)"])))
             } else {
-                onCompletion(buffer, nil)
+                complete(with: .success(buffer))
+            }
+        }
+
+        private func complete(with result: Result<Data, Error>) {
+            lock.lock()
+            let shouldCall = !hasCompleted
+            hasCompleted = true
+            let sess = session
+            session = nil
+            lock.unlock()
+
+            if shouldCall {
+                sess?.finishTasksAndInvalidate()
+                onCompletion(result)
             }
         }
     }
+
+    private func performStreamingDownload(url: URL, onProgress: (@Sendable (Double) -> Void)? = nil) async throws -> Data {
+        guard let safeURL = SecurityAudit.validateURL(url.absoluteString) else {
+            throw NSError(domain: "TrackDownload", code: 400, userInfo: [NSLocalizedDescriptionKey: "Security audit rejected URL."])
+        }
+
+        var request = URLRequest(url: safeURL)
+        request.setValue("com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip", forHTTPHeaderField: "User-Agent")
+        request.timeoutInterval = 45.0
+
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 30.0
+        config.timeoutIntervalForResource = 120.0
+        config.waitsForConnectivity = true
+
+        return try await withCheckedThrowingContinuation { continuation in
+            let delegate = TrackDownloadDelegate(
+                onProgress: onProgress,
+                onCompletion: { result in
+                    switch result {
+                    case .success(let data):
+                        continuation.resume(returning: data)
+                    case .failure(let error):
+                        continuation.resume(throwing: error)
+                    }
+                }
+            )
+            let session = URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
+            delegate.session = session
+            let task = session.dataTask(with: request)
+            task.resume()
+        }
+    }
+
+    // MARK: - Explicit Track Download / Cache
 
     public func downloadTrack(track: Track) {
         guard !cacheManager.isCached(videoId: track.id) else { return }
@@ -2219,43 +2339,37 @@ public final class AudioPlayerEngine: ObservableObject {
         Task { @MainActor in
             do {
                 let (streamURL, formatBadge, _) = try await InnerTubeClient.shared.resolveStreamURL(for: track.id, preferredQuality: self.selectedAudioQuality)
-                var req = URLRequest(url: streamURL)
-                req.setValue("com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip", forHTTPHeaderField: "User-Agent")
-
-                let data: Data = try await withCheckedThrowingContinuation { continuation in
-                    let delegate = TrackDownloadDelegate(
-                        onProgress: { ratio in
-                            DispatchQueue.main.async {
-                                self.downloadProgress[track.id] = ratio
-                            }
-                        },
-                        onCompletion: { resultData, error in
-                            if let error = error {
-                                continuation.resume(throwing: error)
-                            } else if let resultData = resultData {
-                                continuation.resume(returning: resultData)
-                            } else {
-                                continuation.resume(throwing: URLError(.unknown))
-                            }
-                        }
-                    )
-                    let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
-                    let task = session.dataTask(with: req)
-                    task.resume()
+                let data = try await self.performStreamingDownload(url: streamURL) { ratio in
+                    DispatchQueue.main.async {
+                        self.downloadProgress[track.id] = ratio
+                    }
                 }
 
                 self.downloadProgress[track.id] = 1.0
 
                 // Allow user to perceptibly see 100% completion ring before transitioning to badge
-                try? await Task.sleep(nanoseconds: 400_000_000)
+                try? await Task.sleep(nanoseconds: 300_000_000)
 
                 var updated = track
                 updated.audioFormat = formatBadge
                 updated.isCached = true
-                self.cacheManager.cacheTrack(track: updated, data: data)
+
+                let lyrics = (self.currentTrack?.id == track.id && !self.lyricLines.isEmpty) ? self.lyricLines : await LRCLIBService.shared.fetchLyrics(for: track)
+                var artworkData: Data? = nil
+                if let artURL = track.artworkURL, let safeArt = SecurityAudit.validateURL(artURL.absoluteString) {
+                    artworkData = try? await URLSession.shared.data(from: safeArt).0
+                }
+
+                self.cacheManager.saveBundle(
+                    track: updated,
+                    audioData: data,
+                    lyrics: lyrics,
+                    artworkData: artworkData
+                )
 
                 if self.currentTrack?.id == track.id {
                     self.currentTrack?.isCached = true
+                    self.currentTrack?.audioFormat = formatBadge
                 }
                 for i in 0..<self.queue.count {
                     if self.queue[i].id == track.id {
@@ -2275,6 +2389,7 @@ public final class AudioPlayerEngine: ObservableObject {
                 NotificationCenter.default.post(name: Self.trackDidCacheNotification, object: track.id)
                 #if os(iOS)
                 MobileToastManager.shared.show(message: "Downloaded for Offline", icon: "arrow.down.circle.fill")
+                MobileHaptics.trigger(.medium)
                 #endif
             } catch {
                 #if DEBUG
