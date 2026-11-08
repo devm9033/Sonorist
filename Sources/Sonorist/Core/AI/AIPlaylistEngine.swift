@@ -79,6 +79,14 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
 
         var libraryChanged = false
         for lIdx in (0..<curatedLibrary.categories.count).reversed() {
+            // Reconcile direct tracks laying in folder
+            let prevDirect = curatedLibrary.categories[lIdx].directTrackIds.count
+            curatedLibrary.categories[lIdx].directTrackIds.removeAll(where: { !cachedIds.contains($0) })
+            if curatedLibrary.categories[lIdx].directTrackIds.count != prevDirect {
+                libraryChanged = true
+            }
+
+            // Reconcile subfolders
             for gIdx in (0..<curatedLibrary.categories[lIdx].genres.count).reversed() {
                 let prev = curatedLibrary.categories[lIdx].genres[gIdx].trackIds.count
                 curatedLibrary.categories[lIdx].genres[gIdx].trackIds.removeAll(where: { !cachedIds.contains($0) })
@@ -86,17 +94,19 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
                     libraryChanged = true
                 }
             }
-            // Retain custom folders even if they have 0 tracks
+            // Retain custom subfolders even if they have 0 tracks
             let prevCount = curatedLibrary.categories[lIdx].genres.count
             curatedLibrary.categories[lIdx].genres.removeAll(where: { !$0.isCustom && $0.trackIds.isEmpty })
             if curatedLibrary.categories[lIdx].genres.count != prevCount {
                 libraryChanged = true
             }
         }
-        // Retain category if it contains custom folders
+        // Retain category if it contains direct tracks or custom subfolders
         let prevCatCount = curatedLibrary.categories.count
         curatedLibrary.categories.removeAll(where: { cat in
-            cat.genres.isEmpty || (cat.genres.allSatisfy { $0.trackIds.isEmpty && !$0.isCustom })
+            cat.directTrackIds.isEmpty && (
+                cat.genres.isEmpty || cat.genres.allSatisfy { $0.trackIds.isEmpty && !$0.isCustom }
+            )
         })
         if curatedLibrary.categories.count != prevCatCount {
             libraryChanged = true
@@ -610,94 +620,109 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
     public struct AISongClassification: Codable, Sendable {
         public let whatIsThisSong: String?
         public let language: String
-        public let genre: String
+        public let genre: String // Represents user subfolder (empty if laying directly in folder)
         public let icon: String
         public let description: String
 
-        public init(language: String, genre: String, icon: String, description: String, whatIsThisSong: String? = nil) {
+        public init(language: String, genre: String = "", icon: String = "folder.fill", description: String = "", whatIsThisSong: String? = nil) {
             self.language = language
             self.genre = genre
             self.icon = icon
             self.description = description
             self.whatIsThisSong = whatIsThisSong
         }
+
+        enum CodingKeys: String, CodingKey {
+            case whatIsThisSong, language, genre, subfolder, icon, description
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            whatIsThisSong = try container.decodeIfPresent(String.self, forKey: .whatIsThisSong)
+            language = try container.decodeIfPresent(String.self, forKey: .language) ?? "English"
+            let rawSubfolder = try container.decodeIfPresent(String.self, forKey: .subfolder)
+            let rawGenre = try container.decodeIfPresent(String.self, forKey: .genre)
+            let chosen = rawSubfolder ?? rawGenre ?? ""
+            genre = (chosen.caseInsensitiveCompare("null") == .orderedSame || chosen.caseInsensitiveCompare("none") == .orderedSame) ? "" : chosen
+            icon = try container.decodeIfPresent(String.self, forKey: .icon) ?? "folder.fill"
+            description = try container.decodeIfPresent(String.self, forKey: .description) ?? ""
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encodeIfPresent(whatIsThisSong, forKey: .whatIsThisSong)
+            try container.encode(language, forKey: .language)
+            try container.encode(genre, forKey: .genre)
+            try container.encode(icon, forKey: .icon)
+            try container.encode(description, forKey: .description)
+        }
     }
 
-    // MARK: - Active Genre Catalog & Custom Folder Resolution
+    // MARK: - Active User Subfolders Catalog & Resolution
 
-    public func activeGenres(for language: String? = nil) -> [(name: String, icon: String, description: String)] {
-        // 1. Language-specific overrides if defined
+    /// Returns the user-created subfolders for a specific language (or all across the library if language is nil).
+    public func activeSubfolders(for language: String? = nil) -> [AIGenreGroup] {
         if let lang = language,
-           let cat = curatedLibrary.categories.first(where: { $0.language.caseInsensitiveCompare(lang) == .orderedSame }),
-           !cat.genres.isEmpty {
-            return cat.genres.map { ($0.name, $0.icon, $0.description) }
+           let cat = curatedLibrary.categories.first(where: { $0.language.caseInsensitiveCompare(lang) == .orderedSame }) {
+            return cat.genres.filter { $0.isCustom }
         }
-
-        // 2. Standard baseline catalog
-        var catalog: [String: (name: String, icon: String, description: String)] = [
-            "pop & dance": ("Pop & Dance", "flame.fill", "High-energy chart-toppers and dance beats"),
-            "melodic & romance": ("Melodic & Romance", "heart.fill", "Soulful melodies and romantic tracks"),
-            "acoustic & chill": ("Acoustic & Chill", "moon.stars.fill", "Gentle acoustic, lo-fi, and midnight vibes"),
-            "classics & heritage": ("Classics & Heritage", "sparkles", "Timeless classics and golden era favorites"),
-            "energetic & beats": ("Energetic & Beats", "bolt.fill", "Bass-heavy rap, beats, and motivational energy")
-        ]
-
-        // Inspect existing library categories for custom folders (e.g. "Spiritual")
+        var custom: [AIGenreGroup] = []
         for cat in curatedLibrary.categories {
             for g in cat.genres where g.isCustom {
-                if g.aliases.contains(where: { $0.caseInsensitiveCompare("Classics & Heritage") == .orderedSame }) ||
-                   g.name.localizedCaseInsensitiveContains("spiritual") {
-                    catalog.removeValue(forKey: "classics & heritage")
+                if !custom.contains(where: { $0.name.caseInsensitiveCompare(g.name) == .orderedSame }) {
+                    custom.append(g)
                 }
-                catalog[g.name.lowercased()] = (
-                    g.name,
-                    g.icon,
-                    g.description.isEmpty ? "Curated playlist folder" : g.description
-                )
             }
         }
+        return custom
+    }
 
-        return Array(catalog.values).sorted { $0.name < $1.name }
+    public func activeSubfoldersDescription(for language: String? = nil) -> String {
+        let list = activeSubfolders(for: language)
+        if list.isEmpty {
+            return "None created yet. Subfolder should be null."
+        }
+        return list.map { "- \($0.name): \($0.description.isEmpty ? "User subfolder" : $0.description)" }.joined(separator: "\n")
+    }
+
+    public func activeGenres(for language: String? = nil) -> [(name: String, icon: String, description: String)] {
+        return activeSubfolders(for: language).map { ($0.name, $0.icon, $0.description) }
     }
 
     public func activeGenresDescription(for language: String? = nil) -> String {
-        let list = activeGenres(for: language)
-        return list.map { "- \($0.name): \($0.description)" }.joined(separator: "\n")
+        return activeSubfoldersDescription(for: language)
     }
 
     private func querySingleTrackClassification(track: Track) async throws -> AISongClassification {
-        let genreListDesc = activeGenresDescription()
+        let subfoldersDesc = activeSubfoldersDescription()
         let prompt = """
         You are an expert musicologist and multilingual music cataloger.
         Song Title: "\(track.title)"
         Artist: "\(track.artist)"
 
-        Analyze this song by carefully answering these three specific questions:
+        Analyze this song by answering:
         1. What exactly is this song by this artist? Describe its musical context, cultural origin, album, or soundtrack.
         2. In which language is this song sung? (e.g. Bengali, Hindi, English, Punjabi, Tamil, Telugu, Malayalam, Kannada, Urdu, Spanish, Korean, or Instrumental).
-        3. Which musical genre does it belong to, chosen strictly from these available playlist folders:
-        \(genreListDesc)
+        3. Available user-created subfolders:
+        \(subfoldersDesc)
 
-        CRITICAL LINGUISTIC & GENRE RULES:
-        - Check the artist and song title carefully.
-        - Many Indian songs have their titles and artist names transliterated into English/Latin letters.
+        CRITICAL LINGUISTIC & SUBFOLDER RULES:
+        - Accurately determine the true sung Language of the track.
         - NEVER classify an Indian song as "English" simply because its title or artist is written in the Roman alphabet!
-        - If "Spiritual" (or devotional/sacred) is among the available genres:
-          * Any song that is spiritual, devotional, prayer, sacred, Christian worship/rock, or Rabindra Sangeet (such as "Majhe Majhe Tobo" or "Hey Shokha" by Arindom/Somlata, or "Lead Me" by Sanctus Real) MUST be classified as "Spiritual".
-        - Examples:
           * "Majhe Majhe Tobo" by Arindom: Rabindra Sangeet -> Language MUST be "Bengali".
           * "Hey Shokha" by Somlata Acharyya Chowdhury: Rabindra Sangeet -> Language MUST be "Bengali".
-          * "Destiny - Mann Atkeya" by Shashwat Sachdev: Hindi romantic ballad -> Language MUST be "Hindi", Genre: "Melodic & Romance".
-          * "Shape of You" by Ed Sheeran: British pop hit -> Language MUST be "English", Genre: "Pop & Dance".
-          * "Lead Me" by Sanctus Real: Christian rock / acoustic ballad -> Language MUST be "English".
+          * "Destiny - Mann Atkeya" by Shashwat Sachdev: Hindi ballad -> Language MUST be "Hindi".
+          * "Shape of You" by Ed Sheeran: British pop hit -> Language MUST be "English".
+          * "Lead Me" by Sanctus Real: Christian rock -> Language MUST be "English".
+        - SUBFOLDER ROUTING:
+          * If this song fits into any of the available user-created subfolders listed above (e.g., if "Spiritual" is listed and the song is devotional, Christian rock, or Rabindra Sangeet), set "subfolder" to that exact name.
+          * If no matching subfolder is listed, or if the song does not match, set "subfolder" to null.
 
         Respond strictly in valid JSON matching this schema:
         {
           "whatIsThisSong": "State what exactly this song is by this artist",
           "language": "LanguageName",
-          "genre": "GenreName",
-          "icon": "music.mic",
-          "description": "Short 1-line description"
+          "subfolder": null
         }
         """
 
@@ -709,7 +734,7 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
         let trackPayload = tracks.map { ["id": $0.id, "title": $0.title, "artist": $0.artist] }
         let payloadData = try JSONSerialization.data(withJSONObject: trackPayload)
         let jsonStr = String(data: payloadData, encoding: .utf8) ?? "[]"
-        let genreListDesc = activeGenresDescription()
+        let subfoldersDesc = activeSubfoldersDescription()
 
         let prompt = """
         You are an expert musicologist and multilingual music cataloger.
@@ -717,22 +742,21 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
         For each song, answer:
         1. What exactly is this song by this artist? (Origin, film/album, background).
         2. In which language is this song sung? (e.g. Bengali, Hindi, English, Punjabi, Tamil, Telugu, Malayalam, Kannada, Urdu, Spanish, Korean, or Instrumental).
-        3. Which musical genre does it belong to, chosen strictly from these available playlist folders:
-        \(genreListDesc)
+        3. Available user-created subfolders:
+        \(subfoldersDesc)
 
-        CRITICAL LINGUISTIC & GENRE RULES:
-        - Check the artist and song title carefully.
-        - Many Indian and international tracks have their titles and artist names transliterated into the Latin/English alphabet.
-        - DO NOT classify a track as "English" merely because its title or artist name is written using English letters!
-        - If "Spiritual" (or devotional/sacred) is among the available genres:
-          * Any song that is spiritual, devotional, prayer, sacred, Christian worship/rock, or Rabindra Sangeet (such as "Majhe Majhe Tobo" or "Hey Shokha" by Arindom/Somlata, or "Lead Me" by Sanctus Real) MUST be classified as "Spiritual".
-        - Key examples:
-          * "Majhe Majhe Tobo" by Arindom -> Exactly Rabindra Sangeet. Language MUST be "Bengali".
-          * "Shraboner Dharar Moto" by Mekhla Dasgupta -> Exactly Rabindra Sangeet. Language MUST be "Bengali".
-          * "Hey Shokha" by Somlata Acharyya Chowdhury -> Exactly Rabindra Sangeet. Language MUST be "Bengali".
-          * "Destiny - Mann Atkeya" by Shashwat Sachdev -> Bollywood Hindi romantic ballad. Language MUST be "Hindi" ("Mann Atkeya" is Hindi; do not let "Destiny" fool you into English).
+        CRITICAL LINGUISTIC & SUBFOLDER RULES:
+        - Accurately determine the true sung Language of the track.
+        - DO NOT classify an Indian track as "English" merely because its title or artist name is written using English letters!
+          * "Majhe Majhe Tobo" by Arindom -> Rabindra Sangeet sung in Bengali. Language MUST be "Bengali".
+          * "Hey Shokha" by Somlata Acharyya Chowdhury -> Rabindra Sangeet sung in Bengali. Language MUST be "Bengali".
+          * "Shraboner Dharar Moto" by Mekhla Dasgupta -> Rabindra Sangeet sung in Bengali. Language MUST be "Bengali".
+          * "Destiny - Mann Atkeya" by Shashwat Sachdev -> Bollywood Hindi romantic ballad. Language MUST be "Hindi".
           * "Shape of You" by Ed Sheeran -> English pop song. Language MUST be "English".
           * "Lead Me" by Sanctus Real -> English Christian acoustic rock. Language MUST be "English".
+        - SUBFOLDER ROUTING:
+          * If a song fits one of the user-created subfolders listed above (e.g. "Spiritual" for devotional songs or Rabindra Sangeet), set "subfolder" to that name.
+          * If no subfolder matches or none are listed, set "subfolder" to null. Songs with null subfolders will cleanly lay directly in their language folder!
 
         List of tracks to analyze:
         \(jsonStr)
@@ -744,7 +768,7 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
               "id": "track_id_from_input",
               "whatIsThisSong": "State what exactly this song is by this artist",
               "language": "Bengali",
-              "genre": "Melodic & Romance"
+              "subfolder": null
             }
           ]
         }
@@ -756,7 +780,8 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
             let id: String
             let whatIsThisSong: String?
             let language: String
-            let genre: String
+            let subfolder: String?
+            let genre: String?
         }
 
         struct SongsWrapper: Codable {
@@ -767,12 +792,13 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
             let categories: [AILanguageCategory]
         }
 
-        // 1. Preferred song-by-song analysis (most accurate, factual, and deterministic)
+        // 1. Preferred song-by-song analysis
         if let songsResult = try? parseJSON(SongsWrapper.self, from: rawResponse), !songsResult.songs.isEmpty {
             var newLibrary = AICuratedLibrary()
             for analyzed in songsResult.songs {
                 let cleanLang = analyzed.language.trimmingCharacters(in: .whitespacesAndNewlines).capitalized
-                let meta = self.genreMetadata(for: analyzed.genre, language: cleanLang)
+                let rawFolder = (analyzed.subfolder ?? analyzed.genre ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let meta = self.genreMetadata(for: rawFolder, language: cleanLang)
                 newLibrary.insert(
                     trackId: analyzed.id,
                     language: cleanLang.isEmpty ? "Other" : cleanLang,
@@ -793,36 +819,33 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
     }
 
     private func genreMetadata(for rawGenre: String, language: String? = nil) -> (name: String, icon: String, description: String) {
-        let g = rawGenre.lowercased()
-        let active = activeGenres(for: language)
+        let g = rawGenre.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !g.isEmpty, g != "null", g != "none", g != "other" else {
+            return ("", "folder.fill", "")
+        }
+        let active = activeSubfolders(for: language)
 
-        // 1. Exact match with active catalog
+        // 1. Exact match with active user subfolders
         if let direct = active.first(where: { $0.name.caseInsensitiveCompare(rawGenre) == .orderedSame }) {
-            return direct
+            return (direct.name, direct.icon, direct.description)
         }
 
-        // 2. Spiritual / Devotional / Sacred matching
+        // 2. Spiritual / Devotional / Sacred matching if user has a spiritual subfolder
         if g.contains("spirit") || g.contains("devot") || g.contains("bhajan") || g.contains("kirtan") || g.contains("rabindra") || g.contains("prayer") || g.contains("gospel") || g.contains("hymn") || g.contains("sacred") {
-            if let spiritualGenre = active.first(where: { $0.name.localizedCaseInsensitiveContains("spirit") || $0.name.localizedCaseInsensitiveContains("devot") }) {
-                return spiritualGenre
+            if let spiritualGenre = active.first(where: { $0.name.localizedCaseInsensitiveContains("spirit") || $0.name.localizedCaseInsensitiveContains("devot") || $0.name.localizedCaseInsensitiveContains("rabindra") }) {
+                return (spiritualGenre.name, spiritualGenre.icon, spiritualGenre.description)
             }
         }
 
-        // 3. Fallback to standard 5
-        if g.contains("dance") || g.contains("pop") {
-            return ("Pop & Dance", "flame.fill", "High-energy chart-toppers and dance beats")
-        } else if g.contains("acoustic") || g.contains("chill") {
-            return ("Acoustic & Chill", "moon.stars.fill", "Gentle acoustic, lo-fi, and midnight vibes")
-        } else if g.contains("classic") || g.contains("heritage") || g.contains("old") {
-            if let spiritualGenre = active.first(where: { $0.name.localizedCaseInsensitiveContains("spirit") }) {
-                return spiritualGenre
-            }
-            return ("Classics & Heritage", "sparkles", "Timeless classics and golden era favorites")
-        } else if g.contains("energetic") || g.contains("rap") || g.contains("beat") {
-            return ("Energetic & Beats", "bolt.fill", "Bass-heavy rap, beats, and motivational energy")
-        } else {
-            return ("Melodic & Romance", "heart.fill", "Soulful melodies and romantic tracks")
+        // 3. Check aliases
+        if let aliasMatch = active.first(where: { group in
+            group.aliases.contains(where: { $0.caseInsensitiveCompare(rawGenre) == .orderedSame })
+        }) {
+            return (aliasMatch.name, aliasMatch.icon, aliasMatch.description)
         }
+
+        // 4. If no user subfolder matches, do NOT invent artificial folders! Return empty so it lays in the main language folder!
+        return ("", "folder.fill", "")
     }
 
     private func executeLLMRequest(prompt: String, isTestPing: Bool = false, retryCount: Int = 0) async throws -> String {
@@ -1028,12 +1051,11 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
             langIcon = "globe"
         }
 
-        // 2. Genre determination
-        var genre = "Melodic & Romance"
-        var genreIcon = "heart.fill"
-        var genreDesc = "Soulful melodies and romantic tracks"
-
-        let hasSpiritualInCatalog = activeGenres(for: language).contains(where: { $0.name.localizedCaseInsensitiveContains("spirit") })
+        // 2. Subfolder determination (only if a matching user-created subfolder exists)
+        let userSubfolders = activeSubfolders(for: language)
+        var genre = ""
+        var genreIcon = "folder.fill"
+        var genreDesc = ""
 
         let spiritualKeywords = [
             "spiritual", "devotional", "bhajan", "kirtan", "aarti", "mantra", "chalisa", 
@@ -1045,35 +1067,51 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
 
         let danceKeywords = ["dance", "remix", "party", "club", "pop", "disco", "beat", "upbeat", "levitating", "badshah", "honey singh", "edm", "house", "dj"]
         let acousticKeywords = ["acoustic", "unplugged", "chill", "night", "slow", "soft", "lofi", "lo-fi", "coffee", "sleep", "rain", "anuv jain", "prateek kuhad"]
-        let classicKeywords = ["199", "198", "197", "196", "classic", "old", "retro", "vintage", "kishore", "lata", "rafi", "mukesh", "asha", "jagjit", "ghazal", "heritage", "golden era"]
         let energeticKeywords = ["rap", "hip hop", "drill", "trap", "hype", "bass", "gym", "workout", "phonk", "diss", "sidhu", "karan aujla", "emiway", "raftaar", "divine", "stan", "eminem", "drake"]
 
-        if hasSpiritualInCatalog && spiritualKeywords.contains(where: { combined.contains($0) }) {
-            genre = "Spiritual"
-            genreIcon = "sun.max.fill"
-            genreDesc = "Devotional, spiritual, hymns, prayers, and Rabindra Sangeet"
-        } else if danceKeywords.contains(where: { combined.contains($0) }) {
-            genre = "Pop & Dance"
-            genreIcon = "flame.fill"
-            genreDesc = "High-energy chart-toppers and dance beats"
-        } else if acousticKeywords.contains(where: { combined.contains($0) }) {
-            genre = "Acoustic & Chill"
-            genreIcon = "moon.stars.fill"
-            genreDesc = "Gentle acoustic, lo-fi, and midnight vibes"
-        } else if classicKeywords.contains(where: { combined.contains($0) }) {
-            if hasSpiritualInCatalog {
-                genre = "Spiritual"
-                genreIcon = "sun.max.fill"
-                genreDesc = "Devotional, spiritual, hymns, prayers, and Rabindra Sangeet"
-            } else {
-                genre = "Classics & Heritage"
-                genreIcon = "sparkles"
-                genreDesc = "Timeless classics and golden era favorites"
+        for sf in userSubfolders {
+            let sfLower = sf.name.lowercased()
+            if sfLower.contains("spirit") || sfLower.contains("devot") {
+                if spiritualKeywords.contains(where: { combined.contains($0) }) {
+                    genre = sf.name
+                    genreIcon = sf.icon
+                    genreDesc = sf.description
+                    break
+                }
+            } else if sfLower.contains("rabindra") {
+                if bengaliKeywords.contains(where: { combined.contains($0) }) && (combined.contains("rabindra") || combined.contains("tobo") || combined.contains("shokha") || combined.contains("arindom")) {
+                    genre = sf.name
+                    genreIcon = sf.icon
+                    genreDesc = sf.description
+                    break
+                }
+            } else if sfLower.contains("dance") || sfLower.contains("pop") || sfLower.contains("party") {
+                if danceKeywords.contains(where: { combined.contains($0) }) {
+                    genre = sf.name
+                    genreIcon = sf.icon
+                    genreDesc = sf.description
+                    break
+                }
+            } else if sfLower.contains("acoustic") || sfLower.contains("chill") {
+                if acousticKeywords.contains(where: { combined.contains($0) }) {
+                    genre = sf.name
+                    genreIcon = sf.icon
+                    genreDesc = sf.description
+                    break
+                }
+            } else if sfLower.contains("rap") || sfLower.contains("beat") || sfLower.contains("energetic") {
+                if energeticKeywords.contains(where: { combined.contains($0) }) {
+                    genre = sf.name
+                    genreIcon = sf.icon
+                    genreDesc = sf.description
+                    break
+                }
+            } else if combined.contains(sfLower) {
+                genre = sf.name
+                genreIcon = sf.icon
+                genreDesc = sf.description
+                break
             }
-        } else if energeticKeywords.contains(where: { combined.contains($0) }) {
-            genre = "Energetic & Beats"
-            genreIcon = "bolt.fill"
-            genreDesc = "Bass-heavy rap, beats, and motivational energy"
         }
 
         return AISongClassification(language: language, genre: genre, icon: genreIcon, description: genreDesc)

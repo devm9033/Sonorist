@@ -17,9 +17,9 @@ public final class FolderCustomizationManager: ObservableObject {
         self.targetLanguage = language
         self.editingGenre = nil
         self.isNew = true
-        self.folderName = "Spiritual"
-        self.folderDescription = "Devotional, spiritual, hymns, prayers, and Rabindra Sangeet"
-        self.selectedIcon = "sun.max.fill"
+        self.folderName = ""
+        self.folderDescription = ""
+        self.selectedIcon = "folder.fill"
         self.isPresented = true
     }
 
@@ -242,11 +242,12 @@ public struct AICuratedPlaylistsFolderView: View {
     }
 }
 
-// MARK: - Language Detail View (With Custom Playlist Controls)
+// MARK: - Language Detail View (With Custom Playlist Controls & Direct Songs)
 
 public struct AILanguageDetailView: View {
     public let initialCategory: AILanguageCategory
     @ObservedObject private var engine = AIPlaylistEngine.shared
+    @ObservedObject private var player = AudioPlayerEngine.shared
     @ObservedObject private var manager = FolderCustomizationManager.shared
     @Environment(\.colorScheme) private var colorScheme
 
@@ -262,76 +263,264 @@ public struct AILanguageDetailView: View {
         }) ?? initialCategory
     }
 
+    private var allTracks: [Track] {
+        let allCached = MediaCacheManager.shared.getAllCachedTracks()
+        let idSet = Set(currentCategory.directTrackIds + currentCategory.genres.flatMap { $0.trackIds })
+        return allCached.filter { idSet.contains($0.id) }
+    }
+
+    private var directTracks: [Track] {
+        let allCached = MediaCacheManager.shared.getAllCachedTracks()
+        let idSet = Set(currentCategory.directTrackIds)
+        return allCached.filter { idSet.contains($0.id) }
+    }
+
     public var body: some View {
         List {
+            // Hero Header
             Section {
-                ForEach(currentCategory.genres) { genre in
-                    NavigationLink {
-                        AIGenreTrackListView(language: currentCategory.language, genre: genre)
-                    } label: {
-                        AILanguageGenreRow(
-                            genre: genre,
-                            isLight: isLight,
-                            color: genreColor(for: genre.name)
-                        )
-                    }
-                    .listRowBackground(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(isLight ? Color.white : Color.platformSecondarySystemBackground)
-                    )
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        Button {
-                            manager.presentEdit(language: currentCategory.language, genre: genre)
-                        } label: {
-                            Label("Customize", systemImage: "slider.horizontal.3")
+                VStack(spacing: 12) {
+                    HStack(spacing: 14) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .fill(categoryColor(for: currentCategory.language).opacity(0.15))
+                                .frame(width: 56, height: 56)
+                            Image(systemName: currentCategory.icon)
+                                .font(.system(size: 26, weight: .bold))
+                                .foregroundColor(categoryColor(for: currentCategory.language))
                         }
-                        .tint(.blue)
 
-                        if genre.isCustom || currentCategory.genres.count > 1 {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(currentCategory.language)
+                                .font(.system(size: 18, weight: .bold))
+                                .foregroundColor(isLight ? .primary : .white)
+
+                            if currentCategory.genres.isEmpty {
+                                Text("\(directTracks.count) Songs")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(.secondary)
+                            } else {
+                                Text("\(allTracks.count) Songs • \(currentCategory.genres.count) Subfolder\(currentCategory.genres.count == 1 ? "" : "s")")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+
+                        Spacer()
+                    }
+
+                    // Play All & Shuffle Buttons
+                    if !allTracks.isEmpty {
+                        HStack(spacing: 10) {
+                            Button {
+                                if let first = allTracks.first {
+                                    MobileHaptics.trigger(.medium)
+                                    MobileNavigationCoordinator.shared.revealMiniPlayer()
+                                    player.playFromOfflineLibrary(tracks: allTracks, selectedTrack: first)
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "play.fill")
+                                    Text("Play All")
+                                }
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                                .background(FluidTheme.musicRed)
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            }
+
+                            Button {
+                                if let first = allTracks.shuffled().first {
+                                    MobileHaptics.trigger(.medium)
+                                    MobileNavigationCoordinator.shared.revealMiniPlayer()
+                                    player.playFromOfflineLibrary(tracks: allTracks.shuffled(), selectedTrack: first)
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "shuffle")
+                                    Text("Shuffle")
+                                }
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(isLight ? .primary : .white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                                .background(Color.primary.opacity(0.08))
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            }
+                        }
+                    }
+                }
+                .padding(.vertical, 6)
+                .listRowBackground(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(isLight ? Color.white : Color.platformSecondarySystemBackground)
+                )
+            }
+
+            // Subfolders Section (Only when user has created subfolders)
+            if !currentCategory.genres.isEmpty {
+                Section {
+                    ForEach(currentCategory.genres) { genre in
+                        NavigationLink {
+                            AIGenreTrackListView(language: currentCategory.language, genre: genre)
+                        } label: {
+                            AILanguageGenreRow(
+                                genre: genre,
+                                isLight: isLight,
+                                color: genreColor(for: genre.name)
+                            )
+                        }
+                        .listRowBackground(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(isLight ? Color.white : Color.platformSecondarySystemBackground)
+                        )
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button {
+                                manager.presentEdit(language: currentCategory.language, genre: genre)
+                            } label: {
+                                Label("Customize", systemImage: "slider.horizontal.3")
+                            }
+                            .tint(.blue)
+
                             Button(role: .destructive) {
                                 engine.deleteGenre(in: currentCategory.language, name: genre.name)
                             } label: {
                                 Label("Delete", systemImage: "trash")
                             }
                         }
-                    }
-                    .contextMenu {
-                        Button {
-                            manager.presentEdit(language: currentCategory.language, genre: genre)
-                        } label: {
-                            Label("Customize Folder...", systemImage: "slider.horizontal.3")
-                        }
-
-                        if genre.name == "Classics & Heritage" {
+                        .contextMenu {
                             Button {
-                                engine.renameGenre(
-                                    in: currentCategory.language,
-                                    oldName: "Classics & Heritage",
-                                    newName: "Spiritual",
-                                    newIcon: "sun.max.fill",
-                                    newDescription: "Devotional, spiritual, hymns, prayers, and Rabindra Sangeet"
-                                )
+                                manager.presentEdit(language: currentCategory.language, genre: genre)
                             } label: {
-                                Label("Change to 'Spiritual'", systemImage: "sparkles")
+                                Label("Customize Subfolder...", systemImage: "slider.horizontal.3")
                             }
-                        }
 
-                        if genre.isCustom || currentCategory.genres.count > 1 {
                             Button(role: .destructive) {
                                 engine.deleteGenre(in: currentCategory.language, name: genre.name)
                             } label: {
-                                Label("Delete Folder", systemImage: "trash")
+                                Label("Delete Subfolder", systemImage: "trash")
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Subfolders (\(currentCategory.genres.count))")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            // Direct Songs Section (Songs laying directly in the language folder)
+            Section {
+                if directTracks.isEmpty && currentCategory.genres.isEmpty {
+                    Text("No songs in \(currentCategory.language) yet.")
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                        .padding(.vertical, 8)
+                        .listRowBackground(Color.clear)
+                } else {
+                    ForEach(directTracks) { track in
+                        Button {
+                            MobileHaptics.trigger(.light)
+                            MobileNavigationCoordinator.shared.revealMiniPlayer()
+                            player.playFromOfflineLibrary(tracks: directTracks, selectedTrack: track)
+                        } label: {
+                            HStack(spacing: 12) {
+                                TrackArtworkView(
+                                    url: track.artworkURL,
+                                    cornerRadius: 8
+                                )
+                                .frame(width: 44, height: 44)
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(track.title)
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(player.currentTrack?.id == track.id ? FluidTheme.musicRed : (isLight ? .primary : .white))
+                                        .lineLimit(1)
+
+                                    Text(track.artist)
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.secondary)
+                                        .lineLimit(1)
+                                }
+
+                                Spacer()
+
+                                Image(systemName: "arrow.down.circle.fill")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(.green)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                        .listRowBackground(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(isLight ? Color.white : Color.platformSecondarySystemBackground)
+                        )
+                        .swipeActions(edge: .leading) {
+                            if !currentCategory.genres.isEmpty {
+                                Menu {
+                                    ForEach(currentCategory.genres) { targetGenre in
+                                        Button {
+                                            MobileHaptics.trigger(.medium)
+                                            engine.moveTrack(
+                                                trackId: track.id,
+                                                in: currentCategory.language,
+                                                fromGenre: "root",
+                                                toGenre: targetGenre.name
+                                            )
+                                        } label: {
+                                            Label(targetGenre.name, systemImage: targetGenre.icon)
+                                        }
+                                    }
+                                } label: {
+                                    Label("Move", systemImage: "folder")
+                                }
+                                .tint(.blue)
+                            }
+                        }
+                        .contextMenu {
+                            if !currentCategory.genres.isEmpty {
+                                Menu {
+                                    ForEach(currentCategory.genres) { targetGenre in
+                                        Button {
+                                            MobileHaptics.trigger(.medium)
+                                            engine.moveTrack(
+                                                trackId: track.id,
+                                                in: currentCategory.language,
+                                                fromGenre: "root",
+                                                toGenre: targetGenre.name
+                                            )
+                                        } label: {
+                                            Label(targetGenre.name, systemImage: targetGenre.icon)
+                                        }
+                                    }
+                                } label: {
+                                    Label("Move to Subfolder...", systemImage: "folder")
+                                }
+                            }
+
+                            Button {
+                                manager.presentNew(language: currentCategory.language)
+                            } label: {
+                                Label("New Subfolder...", systemImage: "folder.badge.plus")
                             }
                         }
                     }
                 }
             } header: {
-                Text("\(currentCategory.language) Folders (\(currentCategory.genres.count))")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.secondary)
+                if !currentCategory.genres.isEmpty {
+                    Text("Songs (\(directTracks.count))")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.secondary)
+                } else {
+                    Text("All Songs (\(directTracks.count))")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.secondary)
+                }
             }
 
-            // Add Custom Folder Row
+            // Minimal Add Subfolder Section / Action
             Section {
                 Button {
                     MobileHaptics.trigger(.light)
@@ -341,7 +530,7 @@ public struct AILanguageDetailView: View {
                         Image(systemName: "plus.circle.fill")
                             .font(.system(size: 18, weight: .semibold))
                             .foregroundColor(FluidTheme.musicRed)
-                        Text("Add Playlist Folder")
+                        Text("Add Subfolder")
                             .font(.system(size: 14, weight: .medium))
                             .foregroundColor(FluidTheme.musicRed)
                         Spacer()
@@ -353,7 +542,7 @@ public struct AILanguageDetailView: View {
                         .fill(isLight ? Color.white : Color.platformSecondarySystemBackground)
                 )
             } footer: {
-                Text("Swipe left or tap and hold on any folder to customize its name, icon, and genre focus.")
+                Text("Subfolders organize songs inside this language. Songs not in any subfolder stay laying directly in the main folder.")
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
             }
@@ -372,37 +561,54 @@ public struct AILanguageDetailView: View {
         #endif
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Menu {
+                HStack(spacing: 12) {
                     Button {
+                        MobileHaptics.trigger(.light)
                         manager.presentNew(language: currentCategory.language)
                     } label: {
-                        Label("New Playlist Folder...", systemImage: "folder.badge.plus")
+                        Image(systemName: "folder.badge.plus")
+                            .font(.system(size: 15))
+                            .foregroundColor(FluidTheme.musicRed)
                     }
 
-                    Button {
-                        engine.applyGlobalClassicsPreference(useSpiritual: true)
-                    } label: {
-                        Label("Make 'Spiritual' Folder", systemImage: "sparkles")
-                    }
+                    Menu {
+                        Button {
+                            manager.presentNew(language: currentCategory.language)
+                        } label: {
+                            Label("New Subfolder...", systemImage: "folder.badge.plus")
+                        }
 
-                    Divider()
+                        Divider()
 
-                    Button {
-                        Task {
-                            await engine.curateEntireLibrary(force: true)
+                        Button {
+                            Task {
+                                await engine.curateEntireLibrary(force: true)
+                            }
+                        } label: {
+                            Label("Refresh with Llama", systemImage: "arrow.triangle.2.circlepath")
                         }
                     } label: {
-                        Label("Re-Curate Songs into Folders", systemImage: "arrow.triangle.2.circlepath")
+                        Image(systemName: "ellipsis.circle")
+                            .font(.system(size: 16))
+                            .foregroundColor(FluidTheme.musicRed)
                     }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .font(.system(size: 16))
-                        .foregroundColor(FluidTheme.musicRed)
                 }
             }
         }
         .sheet(isPresented: $manager.isPresented) {
             AICustomizeFolderSheet()
+        }
+    }
+
+    private func categoryColor(for language: String) -> Color {
+        switch language.lowercased() {
+        case "hindi": return Color.orange
+        case "bengali", "bangla": return Color.teal
+        case "english": return Color.blue
+        case "punjabi": return Color.yellow
+        case "south indian", "tamil", "telugu", "malayalam", "kannada": return Color.green
+        case "instrumental": return Color.purple
+        default: return FluidTheme.musicRed
         }
     }
 
@@ -654,6 +860,9 @@ public struct AICustomizeFolderSheet: View {
                 icon: manager.selectedIcon,
                 description: manager.folderDescription
             )
+            Task {
+                await engine.curateEntireLibrary(force: true)
+            }
         } else if let eg = manager.editingGenre {
             engine.renameGenre(
                 in: manager.targetLanguage,
@@ -821,28 +1030,50 @@ public struct AIGenreTrackListView: View {
                             .fill(isLight ? Color.white : Color.platformSecondarySystemBackground)
                     )
                     .swipeActions(edge: .leading) {
-                        if !otherGenres.isEmpty {
-                            Menu {
-                                ForEach(otherGenres) { dest in
-                                    Button {
-                                        MobileHaptics.trigger(.medium)
-                                        engine.moveTrack(
-                                            trackId: track.id,
-                                            in: language,
-                                            fromGenre: currentGenre.name,
-                                            toGenre: dest.name
-                                        )
-                                    } label: {
-                                        Label(dest.name, systemImage: dest.icon)
-                                    }
-                                }
+                        Menu {
+                            Button {
+                                MobileHaptics.trigger(.medium)
+                                engine.moveTrack(
+                                    trackId: track.id,
+                                    in: language,
+                                    fromGenre: currentGenre.name,
+                                    toGenre: "root"
+                                )
                             } label: {
-                                Label("Move", systemImage: "folder")
+                                Label("Move to Main Folder", systemImage: "arrow.uturn.backward")
                             }
-                            .tint(.blue)
+
+                            ForEach(otherGenres) { dest in
+                                Button {
+                                    MobileHaptics.trigger(.medium)
+                                    engine.moveTrack(
+                                        trackId: track.id,
+                                        in: language,
+                                        fromGenre: currentGenre.name,
+                                        toGenre: dest.name
+                                    )
+                                } label: {
+                                    Label("Move to \(dest.name)", systemImage: dest.icon)
+                                }
+                            }
+                        } label: {
+                            Label("Move", systemImage: "folder")
                         }
+                        .tint(.blue)
                     }
                     .contextMenu {
+                        Button {
+                            MobileHaptics.trigger(.medium)
+                            engine.moveTrack(
+                                trackId: track.id,
+                                in: language,
+                                fromGenre: currentGenre.name,
+                                toGenre: "root"
+                            )
+                        } label: {
+                            Label("Move to Main Folder", systemImage: "arrow.uturn.backward")
+                        }
+
                         if !otherGenres.isEmpty {
                             Menu {
                                 ForEach(otherGenres) { dest in
@@ -859,7 +1090,7 @@ public struct AIGenreTrackListView: View {
                                     }
                                 }
                             } label: {
-                                Label("Move to Folder...", systemImage: "folder")
+                                Label("Move to Other Subfolder...", systemImage: "folder")
                             }
                         }
                     }

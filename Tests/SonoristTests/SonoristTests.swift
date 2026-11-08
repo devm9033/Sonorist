@@ -1125,39 +1125,42 @@ struct SonoristTestsRunner {
             engine.cacheManager.removeCachedTrack(videoId: trackB.id)
         }
         
-        test("AI Curated Playlists: Hierarchical Language & Genre Persistence with 5-Genre Cap") {
+        test("AI Curated Playlists: Language Folders with Clean Direct Songs (Zero Forced Genres)") {
             var library = AICuratedLibrary()
             
-            // Insert 6 different genres into Hindi
-            library.insert(trackId: "h1", language: "Hindi", genreName: "Pop & Dance")
-            library.insert(trackId: "h2", language: "Hindi", genreName: "Melodic & Romance")
-            library.insert(trackId: "h3", language: "Hindi", genreName: "Acoustic & Chill")
-            library.insert(trackId: "h4", language: "Hindi", genreName: "Classics & Heritage")
-            library.insert(trackId: "h5", language: "Hindi", genreName: "Energetic & Rap")
-            library.insert(trackId: "h6", language: "Hindi", genreName: "Excess Sixth Genre") // Must be capped!
+            // Insert songs without subfolders -> must lay directly in language folder
+            library.insert(trackId: "h1", language: "Hindi")
+            library.insert(trackId: "h2", language: "Hindi")
+            library.insert(trackId: "b1", language: "Bengali")
+            library.insert(trackId: "b2", language: "Bengali")
             
-            guard let hindi = library.categories.first(where: { $0.language == "Hindi" }) else {
-                throw TestError("Expected Hindi category to be created")
+            guard let hindi = library.categories.first(where: { $0.language == "Hindi" }),
+                  let bengali = library.categories.first(where: { $0.language == "Bengali" }) else {
+                throw TestError("Expected Hindi and Bengali categories to be created")
             }
             
-            // Verify max 5 genres enforced
-            guard hindi.genres.count == 5 else {
-                throw TestError("Expected exactly 5 genres due to strict Apple HIG cap, got \(hindi.genres.count)")
+            // Verify ZERO forced genre folders: tracks lay cleanly in directTrackIds
+            guard hindi.genres.isEmpty && bengali.genres.isEmpty else {
+                throw TestError("Expected zero forced genre folders, got \(hindi.genres.count) in Hindi, \(bengali.genres.count) in Bengali")
+            }
+            guard hindi.directTrackIds.count == 2 && bengali.directTrackIds.count == 2 else {
+                throw TestError("Expected 2 direct tracks in Hindi and 2 in Bengali")
             }
             
-            // Verify JSON round-trip
+            // Verify JSON round-trip preserves directTrackIds
             let encoder = JSONEncoder()
             let data = try encoder.encode(library)
             let decoded = try JSONDecoder().decode(AICuratedLibrary.self, from: data)
-            guard decoded.categories.first?.genres.count == 5 else {
-                throw TestError("Decoded library must match 5 genres")
+            guard let decodedHindi = decoded.categories.first(where: { $0.language == "Hindi" }),
+                  decodedHindi.directTrackIds.count == 2 && decodedHindi.genres.isEmpty else {
+                throw TestError("Decoded library must match direct tracks and zero genres")
             }
         }
         
         test("AI Curated Playlists: Dynamic Track Removal and Empty Pruning") {
             var library = AICuratedLibrary()
-            library.insert(trackId: "del_1", language: "English", genreName: "Pop & Dance")
-            library.insert(trackId: "del_2", language: "English", genreName: "Pop & Dance")
+            library.insert(trackId: "del_1", language: "English")
+            library.insert(trackId: "del_2", language: "English")
             
             guard library.totalTrackCount == 2 else {
                 throw TestError("Expected 2 tracks initially")
@@ -1169,7 +1172,7 @@ struct SonoristTestsRunner {
                 throw TestError("Expected 1 track after removal")
             }
             
-            // Remove remaining track: empty genre & category should be cleanly pruned
+            // Remove remaining track: empty category should be cleanly pruned
             library.remove(trackId: "del_2")
             guard library.categories.isEmpty else {
                 throw TestError("Expected empty category to be pruned")
@@ -1197,8 +1200,8 @@ struct SonoristTestsRunner {
             guard hindiResult.language == "Hindi" else {
                 throw TestError("Expected Hindi language for Kumar Sanu, got \(hindiResult.language)")
             }
-            guard popResult.language == "English" && popResult.genre == "Pop & Dance" else {
-                throw TestError("Expected English Pop & Dance for Levitating Dance Remix, got \(popResult.language) - \(popResult.genre)")
+            guard popResult.language == "English" else {
+                throw TestError("Expected English for Levitating Dance Remix, got \(popResult.language)")
             }
             guard punjabiResult.language == "Punjabi" else {
                 throw TestError("Expected Punjabi language for Diljit Dosanjh, got \(punjabiResult.language)")
@@ -1257,82 +1260,85 @@ struct SonoristTestsRunner {
             engine.savePendingQueue(sync: true)
         }
         
-        test("AI Curated Playlists: User Custom Folder Renaming, Track Migration, and Permanence") {
+        test("AI Curated Playlists: User Subfolders, Permanence, Deletion Fallback, and Two-Way Move") {
             var library = AICuratedLibrary()
             
-            // 1. Insert initial track into Classics & Heritage
-            library.insert(trackId: "hey_shokha_1", language: "Bengali", genreName: "Classics & Heritage")
-            guard let bengaliCat = library.categories.first(where: { $0.language == "Bengali" }),
-                  let classicsGenre = bengaliCat.genres.first(where: { $0.name == "Classics & Heritage" }) else {
-                throw TestError("Expected Classics & Heritage to be created")
-            }
-            guard classicsGenre.trackIds.contains("hey_shokha_1") else {
-                throw TestError("Expected hey_shokha_1 in Classics & Heritage")
-            }
-            
-            // 2. User customizes folder: rename Classics & Heritage -> Spiritual
-            library.renameGenre(
+            // 1. User adds custom subfolder "Spiritual" in Bengali
+            library.addCustomGenre(
                 in: "Bengali",
-                oldName: "Classics & Heritage",
-                newName: "Spiritual",
-                newIcon: "sun.max.fill",
-                newDescription: "Devotional, spiritual, hymns, prayers, and Rabindra Sangeet"
+                name: "Spiritual",
+                icon: "sun.max.fill",
+                description: "Devotional, spiritual, hymns, prayers, and Rabindra Sangeet"
             )
             
-            guard let updatedBengali = library.categories.first(where: { $0.language == "Bengali" }) else {
-                throw TestError("Expected Bengali category to exist")
+            guard let bengaliCat = library.categories.first(where: { $0.language == "Bengali" }),
+                  let spiritualSubfolder = bengaliCat.genres.first(where: { $0.name == "Spiritual" }) else {
+                throw TestError("Expected Spiritual subfolder to be created")
             }
-            guard !updatedBengali.genres.contains(where: { $0.name == "Classics & Heritage" }) else {
-                throw TestError("Classics & Heritage should be replaced")
-            }
-            guard let spiritualGenre = updatedBengali.genres.first(where: { $0.name == "Spiritual" }) else {
-                throw TestError("Expected Spiritual genre folder to exist")
+            guard spiritualSubfolder.isCustom == true else {
+                throw TestError("Expected subfolder to be marked isCustom = true")
             }
             
-            // Verify track migration and custom status
-            guard spiritualGenre.trackIds.contains("hey_shokha_1") else {
-                throw TestError("Expected hey_shokha_1 to migrate into Spiritual folder")
+            // 2. Insert matching track into Spiritual subfolder, and unfiled track into root
+            library.insert(trackId: "hey_shokha_1", language: "Bengali", genreName: "Spiritual")
+            library.insert(trackId: "unfiled_2", language: "Bengali") // no subfolder specified
+            
+            guard let bengaliWithTracks = library.categories.first(where: { $0.language == "Bengali" }),
+                  let updatedSpiritual = bengaliWithTracks.genres.first(where: { $0.name == "Spiritual" }) else {
+                throw TestError("Expected Bengali with tracks")
             }
-            guard spiritualGenre.isCustom == true else {
-                throw TestError("Expected folder to be marked isCustom = true")
+            guard updatedSpiritual.trackIds.contains("hey_shokha_1") else {
+                throw TestError("Expected hey_shokha_1 in Spiritual subfolder")
             }
-            guard spiritualGenre.aliases.contains(where: { $0.caseInsensitiveCompare("Classics & Heritage") == .orderedSame }) else {
-                throw TestError("Expected Classics & Heritage in aliases")
+            guard bengaliWithTracks.directTrackIds.contains("unfiled_2") else {
+                throw TestError("Expected unfiled_2 to lay directly in Bengali main folder")
             }
             
-            // 3. Insert new track using alias: should automatically route into Spiritual
-            library.insert(trackId: "majhe_majhe_2", language: "Bengali", genreName: "Classics & Heritage")
-            guard let reloadedSpiritual = library.categories.first?.genres.first(where: { $0.name == "Spiritual" }),
-                  reloadedSpiritual.trackIds.contains("majhe_majhe_2") else {
-                throw TestError("Expected track using alias Classics & Heritage to route to Spiritual")
+            // 3. Move unfiled_2 from root into Spiritual subfolder
+            library.moveTrack(trackId: "unfiled_2", in: "Bengali", fromGenre: "root", toGenre: "Spiritual")
+            guard let bengaliAfterMoveToSub = library.categories.first(where: { $0.language == "Bengali" }),
+                  let spiritualAfterMove = bengaliAfterMoveToSub.genres.first(where: { $0.name == "Spiritual" }) else {
+                throw TestError("Expected Bengali category after move to subfolder")
+            }
+            guard spiritualAfterMove.trackIds.contains("unfiled_2") && !bengaliAfterMoveToSub.directTrackIds.contains("unfiled_2") else {
+                throw TestError("Expected unfiled_2 moved into Spiritual subfolder")
             }
             
-            // 4. Test manual track movement
-            library.insert(trackId: "lead_me_3", language: "Bengali", genreName: "Melodic & Romance")
-            library.moveTrack(trackId: "lead_me_3", in: "Bengali", fromGenre: "Melodic & Romance", toGenre: "Spiritual")
-            
-            guard let spiritualAfterMove = library.categories.first?.genres.first(where: { $0.name == "Spiritual" }),
-                  let romanceAfterMove = library.categories.first?.genres.first(where: { $0.name == "Melodic & Romance" }) else {
-                throw TestError("Expected genres to exist after move")
+            // 4. Move unfiled_2 back from Spiritual subfolder to root
+            library.moveTrack(trackId: "unfiled_2", in: "Bengali", fromGenre: "Spiritual", toGenre: "root")
+            guard let bengaliAfterMoveToRoot = library.categories.first(where: { $0.language == "Bengali" }),
+                  let spiritualAfterBack = bengaliAfterMoveToRoot.genres.first(where: { $0.name == "Spiritual" }) else {
+                throw TestError("Expected Bengali category after move back to root")
             }
-            guard spiritualAfterMove.trackIds.contains("lead_me_3") && !romanceAfterMove.trackIds.contains("lead_me_3") else {
-                throw TestError("Expected lead_me_3 moved to Spiritual and removed from Melodic & Romance")
+            guard bengaliAfterMoveToRoot.directTrackIds.contains("unfiled_2") && !spiritualAfterBack.trackIds.contains("unfiled_2") else {
+                throw TestError("Expected unfiled_2 returned to root")
             }
             
-            // 5. Test permanence: empty custom folders must NEVER be pruned!
+            // 5. Test empty subfolder permanence
             library.remove(trackId: "hey_shokha_1")
-            library.remove(trackId: "majhe_majhe_2")
-            library.remove(trackId: "lead_me_3")
-            
-            guard let bengaliAfterPrune = library.categories.first(where: { $0.language == "Bengali" }),
-                  let emptySpiritual = bengaliAfterPrune.genres.first(where: { $0.name == "Spiritual" }) else {
-                throw TestError("Expected custom Spiritual folder to STAY permanently even when empty!")
+            guard let bengaliWithEmptySub = library.categories.first(where: { $0.language == "Bengali" }),
+                  let emptySub = bengaliWithEmptySub.genres.first(where: { $0.name == "Spiritual" }) else {
+                throw TestError("Expected empty Spiritual subfolder to STAY permanently!")
             }
-            guard emptySpiritual.trackIds.isEmpty else {
-                throw TestError("Expected Spiritual folder to be empty")
+            guard emptySub.trackIds.isEmpty else {
+                throw TestError("Expected Spiritual subfolder to be empty")
             }
             
-            // 6. Test heuristic routing when Spiritual is in catalog
+            // 6. Test subfolder deletion returns tracks to root (no songs lost!)
+            library.insert(trackId: "song_to_save", language: "Bengali", genreName: "Spiritual")
+            library.deleteGenre(in: "Bengali", name: "Spiritual")
+            guard let bengaliAfterDelete = library.categories.first(where: { $0.language == "Bengali" }) else {
+                throw TestError("Expected Bengali category after deleting subfolder")
+            }
+            guard bengaliAfterDelete.genres.isEmpty else {
+                throw TestError("Expected Spiritual subfolder to be deleted")
+            }
+            guard bengaliAfterDelete.directTrackIds.contains("song_to_save") else {
+                throw TestError("Expected deleted subfolder's tracks to fallback to directTrackIds root!")
+            }
+            
+            // 7. Test heuristic routing with custom Spiritual subfolder present
+            library.addCustomGenre(in: "Bengali", name: "Spiritual")
             let engine = AIPlaylistEngine.shared
             engine.curatedLibrary = library
             let shokhaTrack = Track(id: "shokha_test", title: "Hey Shokha", artist: "Somlata Acharyya Chowdhury", durationSeconds: 210)
