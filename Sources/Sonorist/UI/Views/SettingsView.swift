@@ -267,100 +267,94 @@ public struct SettingsView: View {
 
                     HStack {
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("Provider")
+                            Text("OpenRouter API Key")
                                 .font(.system(size: 13, weight: .medium))
-                            Text("Service used for song classification.")
+                            Text("Stored securely. Only song title and artist are transmitted.")
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        SecureField("Enter API Key", text: Binding(
+                            get: { AIProviderConfig.shared.apiKey },
+                            set: { AIProviderConfig.shared.apiKey = $0 }
+                        ))
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .frame(width: 220)
+                    }
+                    .padding(14)
+
+                    if let url = URL(string: AIProviderConfig.shared.selectedProvider.instructionsURL) {
+                        HStack {
+                            Link("Get Free OpenRouter Key ↗", destination: url)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(FluidTheme.musicRed)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.bottom, 6)
+                    }
+
+                    Divider().opacity(0.2)
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Free AI Model")
+                                .font(.system(size: 13, weight: .medium))
+                            Text("100% Free • Filtered for zero-cost music classification.")
                                 .font(.system(size: 11))
                                 .foregroundColor(.secondary)
                         }
                         Spacer()
                         Picker("", selection: Binding(
-                            get: { AIProviderConfig.shared.selectedProvider },
-                            set: { (val: AIProvider) in
-                                AIProviderConfig.shared.selectedProvider = val
-                                FluidHaptics.tap()
-                            }
+                            get: { AIProviderConfig.shared.selectedModelId },
+                            set: { AIProviderConfig.shared.selectedModelId = $0 }
                         )) {
-                            ForEach(AIProvider.allCases) { prov in
-                                Text(prov.displayName).tag(prov)
+                            ForEach(AIProviderConfig.shared.availableFreeModels) { model in
+                                Text(model.name).tag(model.id)
                             }
                         }
                         .labelsHidden()
-                        .frame(width: 180)
+                        .frame(width: 240)
                     }
                     .padding(14)
 
-                    if AIProviderConfig.shared.selectedProvider.requiresApiKey {
-                        Divider().opacity(0.2)
-                        
-                        HStack {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("API Key")
-                                    .font(.system(size: 13, weight: .medium))
-                                Text("Stored securely. Only song title and artist are transmitted.")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(.secondary)
+                    Divider().opacity(0.2)
+
+                    HStack {
+                        Button {
+                            FluidHaptics.tap()
+                            Task {
+                                _ = await AIPlaylistEngine.shared.testAPIConnection()
                             }
-                            Spacer()
-                            SecureField("Enter API Key", text: Binding(
-                                get: { AIProviderConfig.shared.apiKey },
-                                set: { AIProviderConfig.shared.apiKey = $0 }
-                            ))
-                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                            .frame(width: 200)
-                        }
-                        .padding(14)
-
-                        if !AIProviderConfig.shared.selectedProvider.instructionsURL.isEmpty,
-                           let url = URL(string: AIProviderConfig.shared.selectedProvider.instructionsURL) {
-                            HStack {
-                                Link("Get Free \(AIProviderConfig.shared.selectedProvider.shortName) Key ↗", destination: url)
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundColor(FluidTheme.musicRed)
-                                Spacer()
-                            }
-                            .padding(.horizontal, 14)
-                            .padding(.bottom, 6)
-                        }
-
-                        Divider().opacity(0.2)
-
-                        HStack {
-                            Button {
-                                FluidHaptics.tap()
-                                Task {
-                                    _ = await AIPlaylistEngine.shared.testAPIConnection()
+                        } label: {
+                            HStack(spacing: 6) {
+                                if AIPlaylistEngine.shared.testingConnection {
+                                    ProgressView().controlSize(.small)
+                                } else {
+                                    Image(systemName: "checkmark.shield.fill")
                                 }
-                            } label: {
-                                HStack(spacing: 6) {
-                                    if AIPlaylistEngine.shared.testingConnection {
-                                        ProgressView().controlSize(.small)
-                                    } else {
-                                        Image(systemName: "checkmark.shield.fill")
-                                    }
-                                    Text(AIPlaylistEngine.shared.testingConnection ? "Verifying..." : "Test API Key & Verify")
-                                        .font(.system(size: 12, weight: .medium))
-                                }
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
-                                .background(FluidTheme.musicRed.opacity(0.12))
-                                .foregroundColor(FluidTheme.musicRed)
-                                .cornerRadius(6)
+                                Text(AIPlaylistEngine.shared.testingConnection ? "Verifying & Fetching Models..." : "Test Key & Refresh Free Models")
+                                    .font(.system(size: 12, weight: .medium))
                             }
-                            .buttonStyle(PlainButtonStyle())
-                            .disabled(AIPlaylistEngine.shared.testingConnection || AIProviderConfig.shared.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                            if let msg = AIPlaylistEngine.shared.connectionMessage {
-                                Text(msg)
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundColor(msg.hasPrefix("✓") ? .green : .red)
-                                    .padding(.leading, 6)
-                                    .lineLimit(1)
-                            }
-                            Spacer()
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(FluidTheme.musicRed.opacity(0.12))
+                            .foregroundColor(FluidTheme.musicRed)
+                            .cornerRadius(6)
                         }
-                        .padding(14)
+                        .buttonStyle(PlainButtonStyle())
+                        .disabled(AIPlaylistEngine.shared.testingConnection || AIProviderConfig.shared.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                        if let msg = AIPlaylistEngine.shared.connectionMessage {
+                            Text(msg)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(msg.hasPrefix("✓") ? .green : .red)
+                                .padding(.leading, 6)
+                                .lineLimit(1)
+                        }
+                        Spacer()
                     }
+                    .padding(14)
                 }
             }
             

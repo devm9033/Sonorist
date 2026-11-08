@@ -473,29 +473,39 @@ public struct AISettingsSheet: View {
     public var body: some View {
         NavigationStack {
             Form {
-                // Provider Selection
-                Section("Provider") {
-                    Picker("Provider", selection: $config.selectedProvider) {
-                        ForEach(AIProvider.allCases) { prov in
-                            Text(prov.displayName).tag(prov)
-                        }
-                    }
-                    .pickerStyle(.menu)
-
-                    SecureField("API Key", text: $config.apiKey)
+                // OpenRouter AI Engine
+                Section {
+                    SecureField("OpenRouter API Key", text: $config.apiKey)
                         .font(.system(size: 14, design: .monospaced))
 
-                    if !config.selectedProvider.instructionsURL.isEmpty,
-                       let url = URL(string: config.selectedProvider.instructionsURL) {
+                    if let url = URL(string: config.selectedProvider.instructionsURL) {
                         HStack {
-                            Link("Get Free \(config.selectedProvider.shortName) Key ↗", destination: url)
+                            Link("Get Free OpenRouter Key ↗", destination: url)
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundColor(FluidTheme.musicRed)
                             Spacer()
                         }
                     }
 
-                    // Test Connection Button
+                    // Model Selection Dropdown (Picker)
+                    Picker("Free AI Model", selection: $config.selectedModelId) {
+                        ForEach(config.availableFreeModels) { model in
+                            Text(model.name).tag(model.id)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    HStack(spacing: 6) {
+                        Image(systemName: "sparkles")
+                            .foregroundColor(FluidTheme.musicRed)
+                            .font(.system(size: 11))
+                        Text("100% Free • Filtered for zero-cost music classification.")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.vertical, 2)
+
+                    // Test Connection & Refresh Models Button
                     Button {
                         MobileHaptics.trigger(.medium)
                         Task {
@@ -509,7 +519,7 @@ public struct AISettingsSheet: View {
                             } else {
                                 Image(systemName: "checkmark.shield.fill")
                             }
-                            Text(engine.testingConnection ? "Verifying with \(config.selectedProvider.shortName)..." : "Test API Key & Verify Connection")
+                            Text(engine.testingConnection ? "Verifying & Fetching Models..." : "Test Key & Refresh Free Models")
                                 .font(.system(size: 13, weight: .semibold))
                         }
                         .foregroundColor(FluidTheme.musicRed)
@@ -527,6 +537,10 @@ public struct AISettingsSheet: View {
                         }
                         .padding(.vertical, 2)
                     }
+                } header: {
+                    Text("OpenRouter AI Engine")
+                } footer: {
+                    Text("Enter your free key, then select from verified free models in the dropdown above.")
                 }
 
                 // Automation Toggles

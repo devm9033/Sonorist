@@ -335,61 +335,97 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
         }
     }
 
-    // MARK: - API Key Connection Verification
+    // MARK: - OpenRouter Live Free Model Discovery & API Key Verification
 
-    /// Discovers active supported Gemini model for the user's API key
-    public func discoverGeminiModel(apiKey: String) async -> String? {
-        guard let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models?key=\(apiKey)") else {
-            return nil
+    /// Fetches all active 100% free models directly from OpenRouter API and updates availableFreeModels
+    @MainActor
+    public func fetchAvailableFreeModels(apiKey: String) async -> [OpenRouterModel] {
+        guard let url = URL(string: "https://openrouter.ai/api/v1/models") else {
+            return config.availableFreeModels
         }
+
         var req = URLRequest(url: url)
-        req.timeoutInterval = 10.0
-        req.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
-        guard let (data, response) = try? await URLSession.shared.data(for: req),
-              let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let models = json["models"] as? [[String: Any]] else {
-            return nil
+        req.timeoutInterval = 12.0
+        let cleanKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cleanKey.isEmpty {
+            req.setValue("Bearer \(cleanKey)", forHTTPHeaderField: "Authorization")
         }
+        req.setValue("https://sonorist.app", forHTTPHeaderField: "HTTP-Referer")
+        req.setValue("Sonorist Music Player", forHTTPHeaderField: "X-Title")
 
-        let validModels = models.compactMap { m -> String? in
-            guard let name = m["name"] as? String,
-                  let methods = m["supportedGenerationMethods"] as? [String],
-                  methods.contains("generateContent") else {
-                return nil
+        struct ModelItem: Codable {
+            let id: String
+            let name: String
+            let description: String?
+            let contextLength: Int?
+            let pricing: PricingItem?
+
+            enum CodingKeys: String, CodingKey {
+                case id
+                case name
+                case description
+                case contextLength = "context_length"
+                case pricing
             }
-            return name.replacingOccurrences(of: "models/", with: "")
-        }
 
-        let preferences = [
-            "gemini-3.8-flash",
-            "gemini-3.5-flash",
-            "gemini-3.0-flash",
-            "gemini-2.5-flash",
-            "gemini-2.0-flash",
-            "gemini-2.0-flash-exp",
-            "gemini-1.5-flash-latest",
-            "gemini-1.5-flash"
-        ]
-
-        for pref in preferences {
-            if validModels.contains(pref) {
-                return pref
+            struct PricingItem: Codable {
+                let prompt: String?
+                let completion: String?
             }
         }
 
-        if let anyFlash = validModels.first(where: { $0.contains("flash") }) {
-            return anyFlash
+        struct ResponseData: Codable {
+            let data: [ModelItem]
         }
-        return validModels.first
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: req)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                return config.availableFreeModels
+            }
+
+            let decoded = try JSONDecoder().decode(ResponseData.self, from: data)
+            let freeItems = decoded.data.filter { item in
+                if item.id.hasSuffix(":free") || item.id == "openrouter/free" {
+                    return true
+                }
+                if let p = item.pricing {
+                    let promptCost = Double(p.prompt ?? "1") ?? 1.0
+                    let compCost = Double(p.completion ?? "1") ?? 1.0
+                    return promptCost == 0.0 && compCost == 0.0
+                }
+                return false
+            }
+
+            if !freeItems.isEmpty {
+                let mapped = freeItems.map {
+                    OpenRouterModel(id: $0.id, name: $0.name, description: $0.description, contextLength: $0.contextLength)
+                }.sorted { $0.name < $1.name }
+
+                self.config.availableFreeModels = mapped
+                if !mapped.contains(where: { $0.id == self.config.selectedModelId }) {
+                    if let firstChoice = mapped.first(where: { $0.id.contains("llama-3.3-70b") }) ?? mapped.first {
+                        self.config.selectedModelId = firstChoice.id
+                    }
+                }
+                return mapped
+            }
+        } catch {
+            #if DEBUG
+            print("[AIPlaylistEngine] Failed to fetch live OpenRouter models: \(error)")
+            #endif
+        }
+
+        return config.availableFreeModels
     }
 
-    /// Tests the connection to the configured AI API with a quick ping.
+    /// Tests the connection to OpenRouter API and discovers live free models.
     /// Returns a user-friendly status message and sets connectionMessage.
     @MainActor
     public func testAPIConnection() async -> (success: Bool, message: String) {
-        guard config.isConfigured else {
-            let msg = "Please enter an API key first."
+        let apiKey = config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !apiKey.isEmpty else {
+            let msg = "Please enter your OpenRouter API key first."
             self.connectionMessage = msg
             return (false, msg)
         }
@@ -398,16 +434,20 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
         self.connectionMessage = nil
         defer { self.testingConnection = false }
 
-        let provider = config.selectedProvider
+        // 1. Fetch live free models from OpenRouter to populate the dropdown!
+        let discovered = await fetchAvailableFreeModels(apiKey: apiKey)
 
+        // 2. Perform a test ping with the currently selected free model
         do {
             let testPrompt = "Respond strictly with valid JSON: {\"status\": \"ok\"}"
             _ = try await executeLLMRequest(prompt: testPrompt, isTestPing: true)
-            let successMsg = "✓ Connection Verified! \(provider.displayName) is ready."
+            
+            let modelName = config.availableFreeModels.first(where: { $0.id == config.selectedModelId })?.name ?? config.selectedModelId
+            let successMsg = "✓ Connected! Using \(modelName) (\(discovered.count) free models ready)."
             self.connectionMessage = successMsg
             self.lastSyncError = nil
 
-            // Auto-refresh the entire library so tracks immediately reorganize into their proper languages
+            // 3. Immediately re-curate the library so songs sort into their proper languages
             Task {
                 await self.curateEntireLibrary(force: true)
             }
@@ -419,9 +459,9 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
             if nsErr.code == 400 || nsErr.code == 401 || nsErr.code == 403 {
                 errMsg = "✗ Authentication Failed (\(nsErr.code)): \(detail)"
             } else if (error as? URLError)?.code == .timedOut {
-                errMsg = "✗ Connection Timed Out: API endpoint did not respond. Check your network or switch to OpenRouter."
+                errMsg = "✗ Connection Timed Out: OpenRouter took too long to respond. Choose another free model from the dropdown."
             } else if (error as? URLError)?.code == .notConnectedToInternet {
-                errMsg = "✗ Network Offline: Could not reach \(provider.displayName). Check your internet connection."
+                errMsg = "✗ Network Offline: Could not reach OpenRouter. Check your internet connection."
             } else {
                 errMsg = "✗ Connection Failed: \(detail)"
             }
@@ -598,71 +638,32 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
     }
 
     private func executeLLMRequest(prompt: String, isTestPing: Bool = false, retryCount: Int = 0) async throws -> String {
-        let provider = config.selectedProvider
         let apiKey = config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        var request: URLRequest
-        let currentModel = (provider == .gemini) ? config.activeGeminiModel : provider.defaultModel
-
-        switch provider {
-        case .gemini:
-            guard let url = URL(string: "\(provider.defaultEndpoint)/\(currentModel):generateContent?key=\(apiKey)") else {
-                throw URLError(.badURL)
-            }
-            request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-            var genConfig: [String: Any] = [
-                "responseMimeType": "application/json"
-            ]
-            if !isTestPing && (currentModel.contains("3.") || currentModel.contains("3.8")) && retryCount == 0 {
-                genConfig["thinkingConfig"] = [
-                    "thinkingLevel": "low"
-                ]
-            }
-
-            let body: [String: Any] = [
-                "contents": [
-                    [
-                        "role": "user",
-                        "parts": [["text": prompt]]
-                    ]
-                ],
-                "generationConfig": genConfig
-            ]
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-        case .openrouter:
-            guard let url = URL(string: provider.defaultEndpoint) else {
-                throw URLError(.badURL)
-            }
-            request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-            request.setValue("https://sonorist.app", forHTTPHeaderField: "HTTP-Referer")
-            request.setValue("Sonorist Music Player", forHTTPHeaderField: "X-Title")
-
-            // Multi-model auto-routing across OpenRouter free tier (OpenRouter requires 3 items or fewer in 'models')
-            var body: [String: Any] = [
-                "model": "openrouter/free",
-                "models": [
-                    "openrouter/free",
-                    "meta-llama/llama-3.3-70b-instruct:free",
-                    "deepseek/deepseek-r1:free"
-                ],
-                "messages": [
-                    ["role": "system", "content": "You are a music categorizer that outputs strictly valid JSON."],
-                    ["role": "user", "content": prompt]
-                ]
-            ]
-            if retryCount == 0 {
-                body["response_format"] = ["type": "json_object"]
-            }
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        guard let url = URL(string: config.selectedProvider.defaultEndpoint) else {
+            throw URLError(.badURL)
         }
 
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("https://sonorist.app", forHTTPHeaderField: "HTTP-Referer")
+        request.setValue("Sonorist Music Player", forHTTPHeaderField: "X-Title")
+
+        let modelToUse = config.selectedModelId
+
+        var body: [String: Any] = [
+            "model": modelToUse,
+            "messages": [
+                ["role": "system", "content": "You are an expert musicologist and multilingual music cataloger that outputs strictly valid JSON."],
+                ["role": "user", "content": prompt]
+            ]
+        ]
+        if retryCount == 0 {
+            body["response_format"] = ["type": "json_object"]
+        }
+
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
         request.timeoutInterval = isTestPing ? 15.0 : 45.0
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -676,58 +677,25 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
                 errDetail = str
             }
 
-            // Auto-fallback and retry for Gemini if model not found or deprecated
-            if provider == .gemini && retryCount < 3 && (errDetail.contains("no longer available") || errDetail.contains("not found") || errDetail.contains("not supported") || errDetail.contains("thinkingConfig") || (response as? HTTPURLResponse)?.statusCode == 404 || (response as? HTTPURLResponse)?.statusCode == 400) {
-                // If Google explicitly suggests a model (e.g. "use models/gemini-3.8-flash")
-                if let regex = try? NSRegularExpression(pattern: "models/([a-zA-Z0-9.-]+)"),
-                   let match = regex.matches(in: errDetail, range: NSRange(errDetail.startIndex..., in: errDetail)).last,
-                   let range = Range(match.range(at: 1), in: errDetail) {
-                    let recommended = String(errDetail[range])
-                    if recommended != currentModel {
-                        config.activeGeminiModel = recommended
-                        return try await executeLLMRequest(prompt: prompt, isTestPing: isTestPing, retryCount: retryCount + 1)
-                    }
-                }
-
-                if currentModel != "gemini-3.8-flash" {
-                    config.activeGeminiModel = "gemini-3.8-flash"
-                    return try await executeLLMRequest(prompt: prompt, isTestPing: isTestPing, retryCount: retryCount + 1)
-                }
-
-                if let discovered = await discoverGeminiModel(apiKey: apiKey), discovered != currentModel {
-                    config.activeGeminiModel = discovered
-                    return try await executeLLMRequest(prompt: prompt, isTestPing: isTestPing, retryCount: retryCount + 1)
-                }
-            }
-
-            // Auto-fallback for OpenRouter free models if rate limited (429) or format issue (400)
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 500
-            if provider == .openrouter && retryCount == 0 && (statusCode == 429 || statusCode == 400 || errDetail.contains("rate limit") || errDetail.contains("credits") || errDetail.contains("response_format")) {
-                return try await executeLLMRequest(prompt: prompt, isTestPing: isTestPing, retryCount: retryCount + 1)
+
+            // If selected model is down or rate-limited, fallback to Llama 3.3 70B
+            if retryCount == 0 && (statusCode == 429 || statusCode == 404 || statusCode == 400 || errDetail.contains("no provider serves this model")) {
+                if modelToUse != "meta-llama/llama-3.3-70b-instruct:free" {
+                    config.selectedModelId = "meta-llama/llama-3.3-70b-instruct:free"
+                    return try await executeLLMRequest(prompt: prompt, isTestPing: isTestPing, retryCount: retryCount + 1)
+                }
             }
 
-            throw NSError(domain: "AIPlaylistEngine", code: (response as? HTTPURLResponse)?.statusCode ?? 500, userInfo: [NSLocalizedDescriptionKey: errDetail])
+            throw NSError(domain: "AIPlaylistEngine", code: statusCode, userInfo: [NSLocalizedDescriptionKey: errDetail])
         }
 
-        // Parse LLM provider response structure
-        if provider == .gemini {
-            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let candidates = json["candidates"] as? [[String: Any]],
-               let first = candidates.first,
-               let content = first["content"] as? [String: Any],
-               let parts = content["parts"] as? [[String: Any]],
-               let text = parts.first?["text"] as? String {
-                return text
-            }
-        } else {
-            // OpenRouter (standard OpenAI format)
-            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let choices = json["choices"] as? [[String: Any]],
-               let first = choices.first,
-               let message = first["message"] as? [String: Any],
-               let text = message["content"] as? String {
-                return text
-            }
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let choices = json["choices"] as? [[String: Any]],
+           let first = choices.first,
+           let message = first["message"] as? [String: Any],
+           let text = message["content"] as? String {
+            return text
         }
 
         return String(data: data, encoding: .utf8) ?? ""
