@@ -1383,6 +1383,16 @@ struct SonoristTestsRunner {
             guard hindiCat.directTrackIds.count == 2 else {
                 throw TestError("Expected both tracks to lay directly in Hindi folder")
             }
+
+            // 9. Test Rabindra Sangeet vs Spiritual differentiation
+            // Romantic Rabindra Sangeet must go to Rabindra Sangeet, NOT Spiritual!
+            library.addCustomGenre(in: "Bengali", name: "Rabindra Sangeet")
+            engine.curatedLibrary = library
+            let romanticTrack = Track(id: "tagore_love", title: "Ami Chini Go Chini", artist: "Kishore Kumar", durationSeconds: 200)
+            let loveResult = engine.classifyTrackHeuristically(romanticTrack)
+            guard loveResult.genre == "Rabindra Sangeet" else {
+                throw TestError("Expected Rabindra Sangeet for Ami Chini Go Chini, got \(loveResult.genre)")
+            }
         }
 
         testAsync("AI Curated Playlists: User Selected Model Persistence (Never Reset by System)") {

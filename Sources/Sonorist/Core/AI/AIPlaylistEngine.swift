@@ -317,34 +317,54 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
 
     // MARK: - On-Demand Folder Sync & Routing
 
-    /// Called immediately after a user creates a new subfolder in a language.
-    /// Checks all songs currently in the language's direct list, matches them against the new folder,
-    /// moves matching songs into the folder, and leaves unidentifiable/unmatched songs below!
+    /// Called immediately after a user creates a new subfolder in a language, or when the user taps "Sync" in a language folder or subfolder.
+    /// Checks songs in the language against user-created subfolder(s).
+    /// Supports multi-folder matching (e.g. a devotional Tagore song can belong in BOTH "Rabindra Sangeet" and "Spiritual" if both folders exist!).
+    /// Unmatched/unidentifiable songs cleanly lay below in directTrackIds.
     @MainActor
-    public func syncLanguageFolder(language: String, newSubfolderName: String) async {
+    public func syncLanguageFolder(language: String, newSubfolderName: String? = nil) async {
         let cleanLang = language.trimmingCharacters(in: .whitespacesAndNewlines).capitalized
-        guard let lIdx = curatedLibrary.categories.firstIndex(where: { $0.language.caseInsensitiveCompare(cleanLang) == .orderedSame }),
-              let subfolder = curatedLibrary.categories[lIdx].genres.first(where: { $0.name.caseInsensitiveCompare(newSubfolderName) == .orderedSame }) else {
+        guard let lIdx = curatedLibrary.categories.firstIndex(where: { $0.language.caseInsensitiveCompare(cleanLang) == .orderedSame }) else {
             return
         }
 
+        let subfoldersToSync: [AIGenreGroup]
+        if let specificName = newSubfolderName, !specificName.isEmpty {
+            guard let found = curatedLibrary.categories[lIdx].genres.first(where: { $0.name.caseInsensitiveCompare(specificName) == .orderedSame }) else {
+                return
+            }
+            subfoldersToSync = [found]
+        } else {
+            subfoldersToSync = curatedLibrary.categories[lIdx].genres
+        }
+
+        guard !subfoldersToSync.isEmpty else { return }
+
         let allCached = cacheManager.getAllCachedTracks()
-        let directTrackIds = curatedLibrary.categories[lIdx].directTrackIds
-        let candidateTracks = allCached.filter { directTrackIds.contains($0.id) }
+        // If syncing the entire language, evaluate all tracks in this language category
+        // If syncing a newly created subfolder, evaluate unfiled tracks (directTrackIds)
+        let candidateTrackIds = (newSubfolderName == nil)
+            ? Set(curatedLibrary.categories[lIdx].directTrackIds + curatedLibrary.categories[lIdx].genres.flatMap { $0.trackIds })
+            : Set(curatedLibrary.categories[lIdx].directTrackIds)
+
+        let candidateTracks = allCached.filter { candidateTrackIds.contains($0.id) }
         guard !candidateTracks.isEmpty else { return }
 
         self.isCurating = true
         self.syncingLanguage = cleanLang
-        self.syncingSubfolder = subfolder.name
+        self.syncingSubfolder = newSubfolderName
         defer {
             self.isCurating = false
             self.syncingLanguage = nil
             self.syncingSubfolder = nil
         }
 
-        var matchingTrackIds: [String] = []
+        // Map: trackId -> Set of matching subfolder names
+        var matchesPerTrack: [String: Set<String>] = [:]
 
-        // If AI is configured, query LLM for matching
+        // Build list of target subfolders
+        let subfoldersDescription = subfoldersToSync.map { "- \"\($0.name)\": \($0.description.isEmpty ? $0.name : $0.description)" }.joined(separator: "\n")
+
         if config.isConfigured {
             do {
                 let trackPayload = candidateTracks.map { ["id": $0.id, "title": $0.title, "artist": $0.artist] }
@@ -354,12 +374,18 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
                 let prompt = """
                 You are an expert musicologist and multilingual music cataloger.
                 Language: \(cleanLang)
-                Target Playlist Folder: "\(subfolder.name)" (\(subfolder.description))
+                Available User-Created Subfolder(s) in \(cleanLang):
+                \(subfoldersDescription)
 
-                For each of the following songs, determine if it belongs in the folder "\(subfolder.name)".
-                Guidelines:
-                - If the folder is "Spiritual" or devotional, any prayer, sacred, Christian worship/rock, or Rabindra Sangeet (such as "Majhe Majhe Tobo" or "Hey Shokha" by Arindom/Somlata, or "Lead Me" by Sanctus Real) belongs in this folder (matches = true).
-                - If the song does NOT clearly belong to "\(subfolder.name)", mark matches = false.
+                For each of the following songs, evaluate its lyrics, genre, and musical origin to determine which of the available subfolder(s) (if any) it belongs to.
+
+                CRITICAL LINGUISTIC & GENRE RULES:
+                - MULTI-FOLDER MATCHING: A single song can belong to MULTIPLE subfolders if it genuinely fits them.
+                  * Example: A devotional Rabindra Sangeet (such as "Majhe Majhe Tobo" or "Aguner Poroshmoni") belongs to BOTH "Rabindra Sangeet" AND "Spiritual" (if both folders exist).
+                  * Example: A romantic, seasonal, or patriotic Rabindra Sangeet (such as "Ami Chini Go Chini Tomare", "Aji Jhoro Jhoro", or "Ekla Cholo Re") belongs in "Rabindra Sangeet", but does NOT belong in "Spiritual".
+                - Rabindra Sangeet is an entire musical genre written by Rabindranath Tagore. Only songs that are specifically prayers, sacred hymns, or Puja-parjaay devotional songs belong in "Spiritual".
+                - For "Spiritual" or devotional folders, include prayers, bhajans, kirtans, hymns, gospel, stutis, and sacred devotional songs.
+                - If a song does NOT clearly fit any of the available subfolder(s), return an empty array [] for "subfolders". Unmatched songs will lay directly in the main language folder.
 
                 Songs to evaluate:
                 \(jsonStr)
@@ -369,7 +395,7 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
                   "evaluations": [
                     {
                       "id": "track_id",
-                      "matches": true
+                      "subfolders": ["Folder Name 1", "Folder Name 2"]
                     }
                   ]
                 }
@@ -378,14 +404,23 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
                 let raw = try await executeLLMRequest(prompt: prompt)
                 struct EvaluationItem: Codable {
                     let id: String
-                    let matches: Bool
+                    let subfolders: [String]?
+                    let matches: Bool?
                 }
                 struct EvalWrapper: Codable {
                     let evaluations: [EvaluationItem]
                 }
                 if let decoded = try? parseJSON(EvalWrapper.self, from: raw) {
-                    for item in decoded.evaluations where item.matches {
-                        matchingTrackIds.append(item.id)
+                    for item in decoded.evaluations {
+                        if let sList = item.subfolders, !sList.isEmpty {
+                            for s in sList {
+                                if let matchedFolder = subfoldersToSync.first(where: { $0.name.caseInsensitiveCompare(s) == .orderedSame || $0.name.localizedCaseInsensitiveContains(s) || s.localizedCaseInsensitiveContains($0.name) }) {
+                                    matchesPerTrack[item.id, default: []].insert(matchedFolder.name)
+                                }
+                            }
+                        } else if item.matches == true, let firstFolder = subfoldersToSync.first {
+                            matchesPerTrack[item.id, default: []].insert(firstFolder.name)
+                        }
                     }
                 }
             } catch {
@@ -395,30 +430,36 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
             }
         }
 
-        // If AI didn't match or was offline/failed, run local heuristic check
-        if matchingTrackIds.isEmpty {
+        // If AI didn't match or failed, run local heuristic check
+        if matchesPerTrack.isEmpty {
             for track in candidateTracks {
                 let classification = classifyTrackHeuristically(track)
-                if classification.genre.caseInsensitiveCompare(subfolder.name) == .orderedSame ||
-                   classification.genre.localizedCaseInsensitiveContains(subfolder.name) ||
-                   subfolder.name.localizedCaseInsensitiveContains(classification.genre) {
-                    matchingTrackIds.append(track.id)
+                for sf in subfoldersToSync {
+                    if classification.genre.caseInsensitiveCompare(sf.name) == .orderedSame ||
+                       classification.genre.localizedCaseInsensitiveContains(sf.name) ||
+                       sf.name.localizedCaseInsensitiveContains(classification.genre) {
+                        matchesPerTrack[track.id, default: []].insert(sf.name)
+                    }
                 }
             }
         }
 
-        // Move matched tracks into the subfolder; unmatched songs stay below in directTrackIds!
-        if !matchingTrackIds.isEmpty {
-            for tid in matchingTrackIds {
-                curatedLibrary.moveTrack(
-                    trackId: tid,
-                    in: cleanLang,
-                    fromGenre: "root",
-                    toGenre: subfolder.name
-                )
+        // Update library: apply subfolder placements
+        for (trackId, folderNames) in matchesPerTrack {
+            for folderName in folderNames {
+                if let gIdx = curatedLibrary.categories[lIdx].genres.firstIndex(where: { $0.name.caseInsensitiveCompare(folderName) == .orderedSame }) {
+                    if !curatedLibrary.categories[lIdx].genres[gIdx].trackIds.contains(trackId) {
+                        curatedLibrary.categories[lIdx].genres[gIdx].trackIds.append(trackId)
+                    }
+                }
             }
-            saveLibrary()
+            // Once placed in at least one subfolder, remove from unfiled direct root
+            if !folderNames.isEmpty {
+                curatedLibrary.categories[lIdx].directTrackIds.removeAll(where: { $0 == trackId })
+            }
         }
+
+        saveLibrary()
     }
 
     @MainActor
@@ -866,8 +907,11 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
           * "Shape of You" by Ed Sheeran -> English pop song. Language MUST be "English".
           * "Lead Me" by Sanctus Real -> English Christian acoustic rock. Language MUST be "English".
         - SUBFOLDER ROUTING:
-          * If a song fits one of the user-created subfolders listed above (e.g. "Spiritual" for devotional songs or Rabindra Sangeet), set "subfolder" to that name.
-          * If no subfolder matches or none are listed, set "subfolder" to null. Songs with null subfolders will cleanly lay directly in their language folder!
+          * Rabindra Sangeet is NOT automatically spiritual! Only specific devotional/prayer songs belong in "Spiritual". Romantic, nature, or patriotic Tagore songs do NOT belong in "Spiritual".
+          * If the user created a "Rabindra Sangeet" subfolder, Tagore songs belong in that subfolder.
+          * If the user created a "Spiritual" subfolder, only prayers, bhajans, kirtans, hymns, and sacred Puja-parjaay devotional songs belong in it.
+          * If a song fits a user-created subfolder, set "subfolder" to that name.
+          * If no subfolder matches or none exist, set "subfolder" to null. Songs with null subfolders will cleanly lay directly in their language folder!
 
         List of tracks to analyze:
         \(jsonStr)
@@ -941,9 +985,16 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
             return (direct.name, direct.icon, direct.description)
         }
 
-        // 2. Spiritual / Devotional / Sacred matching if user has a spiritual subfolder
-        if g.contains("spirit") || g.contains("devot") || g.contains("bhajan") || g.contains("kirtan") || g.contains("rabindra") || g.contains("prayer") || g.contains("gospel") || g.contains("hymn") || g.contains("sacred") {
-            if let spiritualGenre = active.first(where: { $0.name.localizedCaseInsensitiveContains("spirit") || $0.name.localizedCaseInsensitiveContains("devot") || $0.name.localizedCaseInsensitiveContains("rabindra") }) {
+        // 2. Rabindra Sangeet matching if user has a Rabindra Sangeet subfolder
+        if g.contains("rabindra") || g.contains("tagore") {
+            if let rabindraGenre = active.first(where: { $0.name.localizedCaseInsensitiveContains("rabindra") || $0.name.localizedCaseInsensitiveContains("tagore") }) {
+                return (rabindraGenre.name, rabindraGenre.icon, rabindraGenre.description)
+            }
+        }
+
+        // 3. Spiritual / Devotional / Sacred matching if user has a spiritual subfolder
+        if g.contains("spirit") || g.contains("devot") || g.contains("bhajan") || g.contains("kirtan") || g.contains("prayer") || g.contains("gospel") || g.contains("hymn") || g.contains("sacred") {
+            if let spiritualGenre = active.first(where: { $0.name.localizedCaseInsensitiveContains("spirit") || $0.name.localizedCaseInsensitiveContains("devot") }) {
                 return (spiritualGenre.name, spiritualGenre.icon, spiritualGenre.description)
             }
         }
@@ -1170,9 +1221,15 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
         let spiritualKeywords = [
             "spiritual", "devotional", "bhajan", "kirtan", "aarti", "mantra", "chalisa", 
             "prayer", "prarthana", "gospel", "worship", "hymn", "meditation", "sacred",
-            "rabindra sangeet", "rabindra", "rabindranath", "tagore", "majhe majhe tobo", 
-            "hey shokha", "shraboner dharar moto", "lead me", "sanctus real", "om namah",
+            "majhe majhe tobo", "hey shokha", "aguner poroshmoni", "anondoloke",
+            "lead me", "sanctus real", "om namah",
             "krishna", "shiva", "ganesh", "hanuman", "ram", "waheguru", "allah", "khwaja"
+        ]
+
+        let rabindraKeywords = [
+            "rabindra sangeet", "rabindra", "rabindranath", "tagore",
+            "majhe majhe tobo", "hey shokha", "shraboner dharar moto",
+            "ami chini go chini", "purano sei", "tumi robe nirobe", "ekla cholo"
         ]
 
         let danceKeywords = ["dance", "remix", "party", "club", "pop", "disco", "beat", "upbeat", "levitating", "badshah", "honey singh", "edm", "house", "dj"]
@@ -1181,15 +1238,15 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
 
         for sf in userSubfolders {
             let sfLower = sf.name.lowercased()
-            if sfLower.contains("spirit") || sfLower.contains("devot") {
-                if spiritualKeywords.contains(where: { combined.contains($0) }) {
+            if sfLower.contains("rabindra") || sfLower.contains("tagore") {
+                if rabindraKeywords.contains(where: { combined.contains($0) }) {
                     genre = sf.name
                     genreIcon = sf.icon
                     genreDesc = sf.description
                     break
                 }
-            } else if sfLower.contains("rabindra") {
-                if bengaliKeywords.contains(where: { combined.contains($0) }) && (combined.contains("rabindra") || combined.contains("tobo") || combined.contains("shokha") || combined.contains("arindom")) {
+            } else if sfLower.contains("spirit") || sfLower.contains("devot") {
+                if spiritualKeywords.contains(where: { combined.contains($0) }) {
                     genre = sf.name
                     genreIcon = sf.icon
                     genreDesc = sf.description

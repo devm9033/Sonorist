@@ -277,13 +277,37 @@ public struct AILanguageDetailView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            // Subheader: song count with Shuffle button
-            HStack {
+            // Subheader: song count with Sync & Shuffle buttons
+            HStack(spacing: 8) {
                 Text("\(allTracks.count) \(allTracks.count == 1 ? "song" : "songs")")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(.secondary)
 
                 Spacer()
+
+                // Dedicated Sync Button for this Language Folder
+                Button {
+                    MobileHaptics.trigger(.medium)
+                    Task {
+                        await engine.syncLanguageFolder(language: currentCategory.language)
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .font(.system(size: 12, weight: .bold))
+                            .rotationEffect(.degrees(engine.isCurating ? 360 : 0))
+                            .animation(engine.isCurating ? Animation.linear(duration: 1.0).repeatForever(autoreverses: false) : .default, value: engine.isCurating)
+                        Text(engine.isCurating ? "Syncing..." : "Sync")
+                            .font(.system(size: 12, weight: .bold))
+                    }
+                    .foregroundColor(FluidTheme.musicRed)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(FluidTheme.musicRed.opacity(0.12))
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(PlainButtonStyle())
+                .disabled(engine.isCurating)
 
                 if !allTracks.isEmpty {
                     Button {
@@ -441,19 +465,31 @@ public struct AILanguageDetailView: View {
         #endif
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                if engine.isCurating && (engine.syncingLanguage?.caseInsensitiveCompare(currentCategory.language) == .orderedSame || engine.syncingLanguage == nil) {
-                    HStack(spacing: 5) {
+                Button {
+                    MobileHaptics.trigger(.medium)
+                    Task {
+                        await engine.syncLanguageFolder(language: currentCategory.language)
+                    }
+                } label: {
+                    HStack(spacing: 4) {
                         Image(systemName: "arrow.triangle.2.circlepath")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.system(size: 15, weight: .semibold))
                             .foregroundColor(FluidTheme.musicRed)
                             .rotationEffect(.degrees(engine.isCurating ? 360 : 0))
-                            .animation(Animation.linear(duration: 1.0).repeatForever(autoreverses: false), value: engine.isCurating)
-                        Text("Syncing...")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(FluidTheme.musicRed)
+                            .animation(engine.isCurating ? Animation.linear(duration: 1.0).repeatForever(autoreverses: false) : .default, value: engine.isCurating)
+                        if engine.isCurating && (engine.syncingLanguage?.caseInsensitiveCompare(currentCategory.language) == .orderedSame || engine.syncingLanguage == nil) {
+                            Text("Syncing")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(FluidTheme.musicRed)
+                        }
                     }
                 }
+                .disabled(engine.isCurating)
             }
+        }
+        .refreshable {
+            MobileHaptics.trigger(.medium)
+            await engine.syncLanguageFolder(language: currentCategory.language)
         }
         .sheet(isPresented: $manager.isPresented) {
             AICustomizeFolderSheet()
@@ -971,8 +1007,8 @@ public struct AIGenreTrackListView: View {
                         Spacer()
                     }
 
-                    // Play All & Shuffle Buttons
-                    HStack(spacing: 10) {
+                    // Play All, Shuffle & Sync Buttons
+                    HStack(spacing: 8) {
                         Button {
                             if let first = tracks.first {
                                 MobileHaptics.trigger(.medium)
@@ -980,14 +1016,14 @@ public struct AIGenreTrackListView: View {
                                 player.playFromOfflineLibrary(tracks: tracks, selectedTrack: first)
                             }
                         } label: {
-                            HStack(spacing: 6) {
+                            HStack(spacing: 5) {
                                 Image(systemName: "play.fill")
                                 Text("Play All")
                             }
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.system(size: 13, weight: .semibold))
                             .foregroundColor(.white)
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
+                            .padding(.vertical, 9)
                             .background(FluidTheme.musicRed)
                             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                         }
@@ -999,17 +1035,38 @@ public struct AIGenreTrackListView: View {
                                 player.playFromOfflineLibrary(tracks: tracks.shuffled(), selectedTrack: first)
                             }
                         } label: {
-                            HStack(spacing: 6) {
+                            HStack(spacing: 5) {
                                 Image(systemName: "shuffle")
                                 Text("Shuffle")
                             }
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.system(size: 13, weight: .semibold))
                             .foregroundColor(isLight ? .primary : .white)
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
+                            .padding(.vertical, 9)
                             .background(Color.primary.opacity(0.08))
                             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                         }
+
+                        Button {
+                            MobileHaptics.trigger(.medium)
+                            Task {
+                                await engine.syncLanguageFolder(language: language, newSubfolderName: currentGenre.name)
+                            }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                                    .rotationEffect(.degrees(engine.isCurating ? 360 : 0))
+                                    .animation(engine.isCurating ? Animation.linear(duration: 1.0).repeatForever(autoreverses: false) : .default, value: engine.isCurating)
+                                Text(engine.isCurating ? "Syncing" : "Sync")
+                            }
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(FluidTheme.musicRed)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 9)
+                            .background(FluidTheme.musicRed.opacity(0.12))
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                        .disabled(engine.isCurating)
                     }
                 }
                 .padding(.vertical, 6)
@@ -1132,7 +1189,7 @@ public struct AIGenreTrackListView: View {
         .scrollContentBackground(.hidden)
         .refreshable {
             MobileHaptics.trigger(.medium)
-            await AIPlaylistEngine.shared.curateEntireLibrary(force: true)
+            await AIPlaylistEngine.shared.syncLanguageFolder(language: language, newSubfolderName: currentGenre.name)
         }
         .navigationTitle(currentGenre.name)
         #if os(iOS)
@@ -1140,18 +1197,26 @@ public struct AIGenreTrackListView: View {
         #endif
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                if engine.isCurating && engine.syncingSubfolder?.caseInsensitiveCompare(currentGenre.name) == .orderedSame {
+                Button {
+                    MobileHaptics.trigger(.medium)
+                    Task {
+                        await engine.syncLanguageFolder(language: language, newSubfolderName: currentGenre.name)
+                    }
+                } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.triangle.2.circlepath")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.system(size: 15, weight: .semibold))
                             .foregroundColor(FluidTheme.musicRed)
                             .rotationEffect(.degrees(engine.isCurating ? 360 : 0))
-                            .animation(Animation.linear(duration: 1.0).repeatForever(autoreverses: false), value: engine.isCurating)
-                        Text("Syncing")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(FluidTheme.musicRed)
+                            .animation(engine.isCurating ? Animation.linear(duration: 1.0).repeatForever(autoreverses: false) : .default, value: engine.isCurating)
+                        if engine.isCurating && engine.syncingSubfolder?.caseInsensitiveCompare(currentGenre.name) == .orderedSame {
+                            Text("Syncing")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(FluidTheme.musicRed)
+                        }
                     }
                 }
+                .disabled(engine.isCurating)
             }
         }
     }
