@@ -22,6 +22,29 @@ struct SonoristTestsRunner {
                 print("  ✗ [FAIL] \(name): \(error)")
             }
         }
+
+        func testAsync(_ name: String, block: @escaping () async throws -> Void) {
+            var isDone = false
+            var caughtError: Error?
+            Task { @MainActor in
+                do {
+                    try await block()
+                } catch {
+                    caughtError = error
+                }
+                isDone = true
+            }
+            while !isDone {
+                RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.05))
+            }
+            if let error = caughtError {
+                failed += 1
+                print("  ✗ [FAIL] \(name): \(error)")
+            } else {
+                passed += 1
+                print("  ✓ [PASS] \(name)")
+            }
+        }
         
         // MARK: - 1. Security & ATS Validation
         test("SecurityAudit: Valid YouTube & LRCLIB URLs Pass ATS") {
@@ -1359,6 +1382,40 @@ struct SonoristTestsRunner {
             }
             guard hindiCat.directTrackIds.count == 2 else {
                 throw TestError("Expected both tracks to lay directly in Hindi folder")
+            }
+        }
+
+        testAsync("AI Curated Playlists: User Selected Model Persistence (Never Reset by System)") {
+            let config = AIProviderConfig.shared
+            let engine = AIPlaylistEngine.shared
+            
+            // 1. User picks DeepSeek R1
+            config.selectedModelId = "deepseek/deepseek-r1:free"
+            guard config.selectedModelId == "deepseek/deepseek-r1:free" else {
+                throw TestError("Failed to set selectedModelId to deepseek/deepseek-r1:free")
+            }
+            guard config.availableFreeModels.contains(where: { $0.id == "deepseek/deepseek-r1:free" }) else {
+                throw TestError("availableFreeModels must automatically preserve the user's selected model for SwiftUI Picker")
+            }
+
+            // 2. Fetch models (offline/empty key) - must NEVER overwrite selectedModelId
+            _ = await engine.fetchAvailableFreeModels(apiKey: "")
+            guard config.selectedModelId == "deepseek/deepseek-r1:free" else {
+                throw TestError("fetchAvailableFreeModels must NEVER overwrite selectedModelId! Found: \(config.selectedModelId)")
+            }
+
+            // 3. User picks Qwen 2.5 72B
+            config.selectedModelId = "qwen/qwen-2.5-72b-instruct:free"
+            guard config.selectedModelId == "qwen/qwen-2.5-72b-instruct:free" else {
+                throw TestError("Failed to set selectedModelId to qwen/qwen-2.5-72b-instruct:free")
+            }
+            guard config.availableFreeModels.contains(where: { $0.id == "qwen/qwen-2.5-72b-instruct:free" }) else {
+                throw TestError("availableFreeModels must include Qwen 72B")
+            }
+
+            // 4. Verify deprecated model is never loaded
+            guard !config.availableFreeModels.contains(where: { $0.id.contains("gemini-2.0-flash-exp") }) else {
+                throw TestError("Deprecated gemini-2.0-flash-exp should never be present in availableFreeModels")
             }
         }
         

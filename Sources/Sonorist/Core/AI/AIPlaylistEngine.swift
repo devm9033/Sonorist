@@ -579,16 +579,14 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
     /// Fetches all active 100% free models directly from OpenRouter API and updates availableFreeModels
     @MainActor
     public func fetchAvailableFreeModels(apiKey: String) async -> [OpenRouterModel] {
-        guard let url = URL(string: "https://openrouter.ai/api/v1/models") else {
+        let cleanKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanKey.isEmpty, let url = URL(string: "https://openrouter.ai/api/v1/models") else {
             return config.availableFreeModels
         }
 
         var req = URLRequest(url: url)
         req.timeoutInterval = 12.0
-        let cleanKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !cleanKey.isEmpty {
-            req.setValue("Bearer \(cleanKey)", forHTTPHeaderField: "Authorization")
-        }
+        req.setValue("Bearer \(cleanKey)", forHTTPHeaderField: "Authorization")
         req.setValue("https://sonorist.app", forHTTPHeaderField: "HTTP-Referer")
         req.setValue("Sonorist Music Player", forHTTPHeaderField: "X-Title")
 
@@ -641,13 +639,18 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
                     OpenRouterModel(id: $0.id, name: $0.name, description: $0.description, contextLength: $0.contextLength)
                 }.sorted { $0.name < $1.name }
 
-                self.config.availableFreeModels = mapped
-                if !mapped.contains(where: { $0.id == self.config.selectedModelId }) {
-                    if let firstChoice = mapped.first(where: { $0.id.contains("llama-3.3-70b") }) ?? mapped.first {
-                        self.config.selectedModelId = firstChoice.id
-                    }
+                // Filter out any deprecated / dead models
+                var updated = mapped.filter { !$0.id.contains("gemini-2.0-flash-exp") }
+
+                // CRITICAL: NEVER overwrite or reset the user's selected model!
+                // Ensure the user's selected model is always present in availableFreeModels so the Picker never breaks.
+                if !updated.contains(where: { $0.id == self.config.selectedModelId }) {
+                    let currentName = self.config.availableFreeModels.first(where: { $0.id == self.config.selectedModelId })?.name ?? self.config.selectedModelId
+                    updated.insert(OpenRouterModel(id: self.config.selectedModelId, name: currentName), at: 0)
                 }
-                return mapped
+
+                self.config.availableFreeModels = updated
+                return updated
             }
         } catch {
             #if DEBUG
@@ -975,7 +978,7 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
         }
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        request.timeoutInterval = isTestPing ? 15.0 : 45.0
+        request.timeoutInterval = isTestPing ? 25.0 : 45.0
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
@@ -990,14 +993,13 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
 
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 500
 
-            // If selected model is down or rate-limited, fallback to Llama 3.3 70B
-            if retryCount == 0 && (statusCode == 429 || statusCode == 404 || statusCode == 400 || errDetail.contains("no provider serves this model")) {
-                if modelToUse != "meta-llama/llama-3.3-70b-instruct:free" {
-                    config.selectedModelId = "meta-llama/llama-3.3-70b-instruct:free"
-                    return try await executeLLMRequest(prompt: prompt, isTestPing: isTestPing, retryCount: retryCount + 1)
-                }
+            // If response_format caused a 400 error, retry once without response_format on the user's chosen model
+            if retryCount == 0 && (statusCode == 400 && (errDetail.localizedCaseInsensitiveContains("response_format") || errDetail.localizedCaseInsensitiveContains("schema"))) {
+                return try await executeLLMRequest(prompt: prompt, isTestPing: isTestPing, retryCount: retryCount + 1)
             }
 
+            // CRITICAL: NEVER overwrite or reset config.selectedModelId!
+            // The model the user chooses must strictly remain what the user chose.
             throw NSError(domain: "AIPlaylistEngine", code: statusCode, userInfo: [NSLocalizedDescriptionKey: errDetail])
         }
 

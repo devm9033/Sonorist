@@ -65,7 +65,13 @@ public final class AIProviderConfig: ObservableObject, @unchecked Sendable {
     }
 
     @Published public var selectedModelId: String {
-        didSet { defaults.set(selectedModelId, forKey: keyOpenRouterModel) }
+        didSet {
+            defaults.set(selectedModelId, forKey: keyOpenRouterModel)
+            // Ensure availableFreeModels always contains selectedModelId so SwiftUI Picker never loses selection tag
+            if !availableFreeModels.contains(where: { $0.id == selectedModelId }) {
+                availableFreeModels.insert(OpenRouterModel(id: selectedModelId, name: selectedModelId), at: 0)
+            }
+        }
     }
 
     @Published public var availableFreeModels: [OpenRouterModel] {
@@ -104,18 +110,23 @@ public final class AIProviderConfig: ObservableObject, @unchecked Sendable {
         self.isAutoRetryPendingEnabled = defaults.object(forKey: keyAutoRetryPending) as? Bool ?? true
 
         let savedModel = defaults.string(forKey: keyOpenRouterModel) ?? "meta-llama/llama-3.3-70b-instruct:free"
-        if savedModel.contains("gemini-2.0-flash-exp") {
-            self.selectedModelId = "meta-llama/llama-3.3-70b-instruct:free"
-        } else {
-            self.selectedModelId = savedModel
-        }
+        let initialModel = savedModel.contains("gemini-2.0-flash-exp") ? "meta-llama/llama-3.3-70b-instruct:free" : savedModel
+        self.selectedModelId = initialModel
 
         if let savedData = defaults.data(forKey: keyDiscoveredModels),
            let decoded = try? JSONDecoder().decode([OpenRouterModel].self, from: savedData),
            !decoded.isEmpty {
-            self.availableFreeModels = decoded
+            var valid = decoded.filter { !$0.id.contains("gemini-2.0-flash-exp") }
+            if !valid.contains(where: { $0.id == initialModel }) {
+                valid.insert(OpenRouterModel(id: initialModel, name: initialModel), at: 0)
+            }
+            self.availableFreeModels = valid
         } else {
-            self.availableFreeModels = Self.fallbackFreeModels
+            var fallbacks = Self.fallbackFreeModels
+            if !fallbacks.contains(where: { $0.id == initialModel }) {
+                fallbacks.insert(OpenRouterModel(id: initialModel, name: initialModel), at: 0)
+            }
+            self.availableFreeModels = fallbacks
         }
 
         if let time = defaults.object(forKey: keyLastSync) as? Double {
