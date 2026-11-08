@@ -463,30 +463,6 @@ public struct AILanguageDetailView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    MobileHaptics.trigger(.medium)
-                    Task {
-                        await engine.syncLanguageFolder(language: currentCategory.language)
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(FluidTheme.musicRed)
-                            .rotationEffect(.degrees(engine.isCurating ? 360 : 0))
-                            .animation(engine.isCurating ? Animation.linear(duration: 1.0).repeatForever(autoreverses: false) : .default, value: engine.isCurating)
-                        if engine.isCurating && (engine.syncingLanguage?.caseInsensitiveCompare(currentCategory.language) == .orderedSame || engine.syncingLanguage == nil) {
-                            Text("Syncing")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(FluidTheme.musicRed)
-                        }
-                    }
-                }
-                .disabled(engine.isCurating)
-            }
-        }
         .refreshable {
             MobileHaptics.trigger(.medium)
             await engine.syncLanguageFolder(language: currentCategory.language)
@@ -545,26 +521,23 @@ public struct AILanguageDetailView: View {
     private func userFolderRow(for subfolder: AIGenreGroup) -> some View {
         let isSyncing = engine.isCurating && (engine.syncingSubfolder?.caseInsensitiveCompare(subfolder.name) == .orderedSame || (engine.syncingSubfolder == nil && engine.syncingLanguage?.caseInsensitiveCompare(currentCategory.language) == .orderedSame))
 
-        return NavigationLink {
-            AIGenreTrackListView(language: currentCategory.language, genre: subfolder)
-        } label: {
+        return ZStack {
+            NavigationLink {
+                AIGenreTrackListView(language: currentCategory.language, genre: subfolder)
+            } label: {
+                EmptyView()
+            }
+            .opacity(0)
+
             HStack(spacing: 14) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .fill(categoryColor(for: currentCategory.language).opacity(0.15))
                         .frame(width: 44, height: 44)
 
-                    if isSyncing {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundColor(categoryColor(for: currentCategory.language))
-                            .rotationEffect(.degrees(engine.isCurating ? 360 : 0))
-                            .animation(Animation.linear(duration: 1.0).repeatForever(autoreverses: false), value: engine.isCurating)
-                    } else {
-                        Image(systemName: subfolder.icon)
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundColor(categoryColor(for: currentCategory.language))
-                    }
+                    Image(systemName: subfolder.icon)
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundColor(categoryColor(for: currentCategory.language))
                 }
 
                 VStack(alignment: .leading, spacing: 3) {
@@ -574,16 +547,9 @@ public struct AILanguageDetailView: View {
 
                     let count = subfolder.trackIds.count
                     if isSyncing {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.triangle.2.circlepath")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(FluidTheme.musicRed)
-                                .rotationEffect(.degrees(engine.isCurating ? 360 : 0))
-                                .animation(Animation.linear(duration: 1.0).repeatForever(autoreverses: false), value: engine.isCurating)
-                            Text("Syncing songs...")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(FluidTheme.musicRed)
-                        }
+                        Text("Syncing songs...")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(FluidTheme.musicRed)
                     } else {
                         Text("\(count) \(count == 1 ? "song" : "songs")")
                             .font(.system(size: 12))
@@ -602,7 +568,7 @@ public struct AILanguageDetailView: View {
                 } else {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.secondary.opacity(0.5))
+                        .foregroundColor(.secondary.opacity(0.4))
                 }
             }
             .padding(.horizontal, 14)
@@ -612,7 +578,6 @@ public struct AILanguageDetailView: View {
                     .fill(isLight ? Color.white : Color.platformSecondarySystemBackground)
             )
         }
-        .buttonStyle(PlainButtonStyle())
     }
 
     // MARK: - Song Row (Matches Library Track Row)
@@ -1195,30 +1160,6 @@ public struct AIGenreTrackListView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    MobileHaptics.trigger(.medium)
-                    Task {
-                        await engine.syncLanguageFolder(language: language, newSubfolderName: currentGenre.name)
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(FluidTheme.musicRed)
-                            .rotationEffect(.degrees(engine.isCurating ? 360 : 0))
-                            .animation(engine.isCurating ? Animation.linear(duration: 1.0).repeatForever(autoreverses: false) : .default, value: engine.isCurating)
-                        if engine.isCurating && engine.syncingSubfolder?.caseInsensitiveCompare(currentGenre.name) == .orderedSame {
-                            Text("Syncing")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(FluidTheme.musicRed)
-                        }
-                    }
-                }
-                .disabled(engine.isCurating)
-            }
-        }
     }
 }
 
