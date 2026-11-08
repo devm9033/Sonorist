@@ -37,6 +37,7 @@
 		E9B8A0132C12345678901234 /* AIProviderConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9B8A0142C12345678901234 /* AIProviderConfig.swift */; };
 		E9B8A0152C12345678901234 /* AIPlaylistEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9B8A0162C12345678901234 /* AIPlaylistEngine.swift */; };
 		E9B8A0172C12345678901234 /* AICuratedPlaylistsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9B8A0182C12345678901234 /* AICuratedPlaylistsView.swift */; };
+		E9B8A0992C12345678901234 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E9B8A09A2C12345678901234 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -47,6 +48,7 @@
 		E9B8A0042C12345678901234 /* Settings.bundle */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.plug-in"; path = Settings.bundle; sourceTree = "<group>"; };
 		E9B8A0062C12345678901234 /* MobileSleepTimerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MobileSleepTimerSheet.swift; path = UI/Components/MobileSleepTimerSheet.swift; sourceTree = "<group>"; };
 		E9B8A0082C12345678901234 /* MobileEqualizerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MobileEqualizerSheet.swift; path = UI/Components/MobileEqualizerSheet.swift; sourceTree = "<group>"; };
+		E9B8A09A2C12345678901234 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		3F86707E888443D1B3F19696 /* SonoristMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SonoristMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		3FB9487BB0B345E39AE05544 /* SecurityAudit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SecurityAudit.swift; path = ../Sources/Sonorist/Core/Security/SecurityAudit.swift; sourceTree = "<group>"; };
 		4EEA71EBC4074E9A87864931 /* MobileNowPlayingSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MobileNowPlayingSheet.swift; path = UI/MobileNowPlayingSheet.swift; sourceTree = "<group>"; };
@@ -136,6 +138,7 @@
 				34377290BC724CBB91AFA2BF /* Products */,
 				93B8A9BB74AF4CF4B865B479 /* Info.plist */,
 				E9B8A0042C12345678901234 /* Settings.bundle */,
+				E9B8A09A2C12345678901234 /* Assets.xcassets */,
 			);
 			sourceTree = "<group>";
 		};
@@ -197,6 +200,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				E9B8A0032C12345678901234 /* Settings.bundle in Resources */,
+				E9B8A0992C12345678901234 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

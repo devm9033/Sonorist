@@ -40,8 +40,6 @@ public struct AICuratedPlaylistsFolderView: View {
     @ObservedObject private var engine = AIPlaylistEngine.shared
     @ObservedObject private var config = AIProviderConfig.shared
     @ObservedObject private var player = AudioPlayerEngine.shared
-    @ObservedObject private var coordinator = MobileNavigationCoordinator.shared
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
 
     private var isLight: Bool { colorScheme == .light }
@@ -49,122 +47,60 @@ public struct AICuratedPlaylistsFolderView: View {
     public init() {}
 
     public var body: some View {
-        GeometryReader { rootGeo in
-            let screenHeight = rootGeo.size.height
+        ZStack {
+            Color.platformSystemBackground
+                .ignoresSafeArea()
 
-            ZStack(alignment: .bottom) {
-                NavigationStack {
-                    ZStack {
-                        Color.platformSystemBackground
-                            .ignoresSafeArea()
-
-                        if engine.curatedLibrary.categories.isEmpty && !engine.isCurating {
-                            emptyOnboardingView
-                        } else {
-                            folderListView
-                        }
+            if engine.curatedLibrary.categories.isEmpty && !engine.isCurating {
+                emptyOnboardingView
+            } else {
+                folderListView
+            }
+        }
+        .navigationTitle("Playlists")
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.large)
+        #endif
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                // Manual Refresh Button
+                Button {
+                    MobileHaptics.trigger(.medium)
+                    engine.spinRefresh = true
+                    Task {
+                        await engine.curateEntireLibrary(force: true)
+                        engine.spinRefresh = false
                     }
-                    .navigationTitle("Playlists")
-                    #if os(iOS)
-                    .navigationBarTitleDisplayMode(.large)
-                    #endif
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button {
-                                dismiss()
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "chevron.left")
-                                        .font(.system(size: 14, weight: .semibold))
-                                    Text("Library")
-                                        .font(.system(size: 16))
-                                }
-                                .foregroundColor(FluidTheme.musicRed)
-                            }
-                        }
-
-                        ToolbarItemGroup(placement: .primaryAction) {
-                            // Manual Refresh Button
-                            Button {
-                                MobileHaptics.trigger(.medium)
-                                engine.spinRefresh = true
-                                Task {
-                                    await engine.curateEntireLibrary(force: true)
-                                    engine.spinRefresh = false
-                                }
-                            } label: {
-                                Image(systemName: "arrow.triangle.2.circlepath")
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .foregroundColor(FluidTheme.musicRed)
-                                    .rotationEffect(.degrees(engine.spinRefresh || engine.isCurating ? 360 : 0))
-                                    .animation(
-                                        engine.spinRefresh || engine.isCurating
-                                            ? Animation.linear(duration: 1.0).repeatForever(autoreverses: false)
-                                            : .default,
-                                        value: engine.spinRefresh || engine.isCurating
-                                    )
-                            }
-                            .disabled(engine.isCurating)
-
-                            // Quick Settings Shortcut
-                            Button {
-                                MobileHaptics.trigger(.light)
-                                engine.showingSettingsSheet = true
-                            } label: {
-                                Image(systemName: "gearshape")
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .foregroundColor(FluidTheme.musicRed)
-                            }
-                        }
-                    }
-                    .sheet(isPresented: $engine.showingSettingsSheet) {
-                        AISettingsSheet()
-                    }
-                    .task {
-                        await engine.processPendingQueueIfNeeded()
-                    }
+                } label: {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(FluidTheme.musicRed)
+                        .rotationEffect(.degrees(engine.spinRefresh || engine.isCurating ? 360 : 0))
+                        .animation(
+                            engine.spinRefresh || engine.isCurating
+                                ? Animation.linear(duration: 1.0).repeatForever(autoreverses: false)
+                                : .default,
+                            value: engine.spinRefresh || engine.isCurating
+                        )
                 }
+                .disabled(engine.isCurating)
 
-                // Docked MiniPlayer floating inside Playlist sheet
-                if !coordinator.isMiniPlayerDismissed && player.currentTrack != nil {
-                    MobileMiniPlayerView(screenHeight: screenHeight) {
-                        withAnimation(FluidTheme.fluidSpring) {
-                            coordinator.sheetDragOffset = 0
-                            coordinator.isNowPlayingExpanded = true
-                        }
-                    }
-                    .padding(.bottom, 6)
-                    .transition(.asymmetric(
-                        insertion: .move(edge: .bottom).combined(with: .opacity),
-                        removal: .move(edge: .bottom).combined(with: .opacity)
-                    ))
-                    .zIndex(50)
-                }
-
-                // Full Now Playing Sheet (expands over Playlist sheet when tapped)
-                if coordinator.isNowPlayingExpanded || coordinator.isDraggingUpFromMiniPlayer {
-                    MobileNowPlayingSheet(isPresented: $coordinator.isNowPlayingExpanded)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .offset(y: coordinator.isDraggingUpFromMiniPlayer ? coordinator.sheetDragOffset : 0)
-                        .transition(.asymmetric(
-                            insertion: .move(edge: .bottom),
-                            removal: .move(edge: .bottom).combined(with: .opacity)
-                        ))
-                        .zIndex(100)
+                // Quick Settings Shortcut
+                Button {
+                    MobileHaptics.trigger(.light)
+                    engine.showingSettingsSheet = true
+                } label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(FluidTheme.musicRed)
                 }
             }
-            .animation(FluidTheme.fluidSpring, value: coordinator.isMiniPlayerDismissed)
-            .animation(FluidTheme.fluidSpring, value: player.currentTrack != nil)
-            .onChange(of: player.isPlaying) { _, isPlaying in
-                if isPlaying {
-                    coordinator.revealMiniPlayer()
-                }
-            }
-            .onChange(of: player.currentTrack?.id) { _, newId in
-                if newId != nil && (player.isPlaying || player.isBuffering) {
-                    coordinator.revealMiniPlayer()
-                }
-            }
+        }
+        .sheet(isPresented: $engine.showingSettingsSheet) {
+            AISettingsSheet()
+        }
+        .task {
+            await engine.processPendingQueueIfNeeded()
         }
     }
 
@@ -362,7 +298,7 @@ public struct AICuratedPlaylistsFolderView: View {
             #endif
             .scrollContentBackground(.hidden)
             .safeAreaInset(edge: .bottom) {
-                Color.clear.frame(height: player.currentTrack != nil ? 76 : 20)
+                Color.clear.frame(height: 180)
             }
             .refreshable {
                 MobileHaptics.trigger(.medium)
@@ -765,7 +701,7 @@ public struct AILanguageDetailView: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .safeAreaInset(edge: .bottom) {
-                Color.clear.frame(height: player.currentTrack != nil ? 76 : 20)
+                Color.clear.frame(height: 180)
             }
         }
         .navigationTitle(currentCategory.language)
@@ -1468,7 +1404,7 @@ public struct AIGenreTrackListView: View {
         #endif
         .scrollContentBackground(.hidden)
         .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: player.currentTrack != nil ? 76 : 20)
+            Color.clear.frame(height: 180)
         }
         .refreshable {
             MobileHaptics.trigger(.medium)
