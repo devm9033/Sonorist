@@ -545,6 +545,24 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
             ]
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
+        case .pollinations:
+            guard let url = URL(string: "https://text.pollinations.ai") else {
+                throw URLError(.badURL)
+            }
+            request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+            let body: [String: Any] = [
+                "messages": [
+                    ["role": "system", "content": "You are a music categorizer that outputs strictly valid JSON."],
+                    ["role": "user", "content": prompt]
+                ],
+                "model": "openai",
+                "jsonMode": true
+            ]
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
         case .groq, .openai, .ollama:
             let endpointStr = provider == .ollama && !config.customEndpoint.isEmpty ? config.customEndpoint : provider.defaultEndpoint
             guard let url = URL(string: endpointStr) else {
@@ -617,6 +635,21 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
                let parts = content["parts"] as? [[String: Any]],
                let text = parts.first?["text"] as? String {
                 return text
+            }
+        } else if provider == .pollinations {
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                if let choices = json["choices"] as? [[String: Any]],
+                   let first = choices.first,
+                   let message = first["message"] as? [String: Any],
+                   let text = message["content"] as? String {
+                    return text
+                }
+                if let directData = try? JSONSerialization.data(withJSONObject: json),
+                   let directText = String(data: directData, encoding: .utf8) {
+                    return directText
+                }
+            } else if let raw = String(data: data, encoding: .utf8), !raw.isEmpty {
+                return raw
             }
         } else {
             if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],

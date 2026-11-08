@@ -468,69 +468,65 @@ public struct AISettingsSheet: View {
                     }
                     .pickerStyle(.menu)
 
-                    if config.selectedProvider != .ollama {
+                    if config.selectedProvider.requiresApiKey {
                         SecureField("API Key", text: $config.apiKey)
                             .font(.system(size: 14, design: .monospaced))
 
-                        HStack {
-                            Link("Get Free \(config.selectedProvider.displayName) Key ↗", destination: URL(string: config.selectedProvider.instructionsURL)!)
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(FluidTheme.musicRed)
-                            Spacer()
-                        }
-
-                        // Dedicated Test API Key Button
-                        Button {
-                            MobileHaptics.trigger(.medium)
-                            Task {
-                                _ = await engine.testAPIConnection()
-                            }
-                        } label: {
-                            HStack(spacing: 8) {
-                                if engine.testingConnection {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                } else {
-                                    Image(systemName: "checkmark.shield.fill")
-                                }
-                                Text(engine.testingConnection ? "Verifying with \(config.selectedProvider.displayName)..." : "Test API Key & Verify Connection")
-                                    .font(.system(size: 13, weight: .semibold))
-                            }
-                            .foregroundColor(FluidTheme.musicRed)
-                        }
-                        .disabled(engine.testingConnection || config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                        if let msg = engine.connectionMessage {
-                            HStack(alignment: .top, spacing: 6) {
-                                Image(systemName: msg.hasPrefix("✓") ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                                    .font(.system(size: 12))
-                                    .foregroundColor(msg.hasPrefix("✓") ? .green : .red)
-                                Text(msg)
+                        if !config.selectedProvider.instructionsURL.isEmpty,
+                           let url = URL(string: config.selectedProvider.instructionsURL) {
+                            HStack {
+                                Link("Get Free \(config.selectedProvider.displayName) Key ↗", destination: url)
                                     .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(msg.hasPrefix("✓") ? .green : .red)
+                                    .foregroundColor(FluidTheme.musicRed)
+                                Spacer()
                             }
-                            .padding(.vertical, 2)
                         }
-                    } else {
+                    } else if config.selectedProvider == .ollama {
                         TextField("Endpoint URL", text: $config.customEndpoint, prompt: Text("http://localhost:11434/v1/chat/completions"))
                             .font(.system(size: 13, design: .monospaced))
-
-                        Button {
-                            MobileHaptics.trigger(.medium)
-                            Task {
-                                _ = await engine.testAPIConnection()
-                            }
-                        } label: {
-                            HStack(spacing: 8) {
-                                if engine.testingConnection {
-                                    ProgressView().controlSize(.small)
-                                }
-                                Text(engine.testingConnection ? "Connecting to Ollama..." : "Test Local Ollama Connection")
-                                    .font(.system(size: 13, weight: .semibold))
-                            }
-                            .foregroundColor(FluidTheme.musicRed)
+                    } else {
+                        HStack(spacing: 6) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                                .font(.system(size: 13))
+                            Text("No sign-up or API key required. Works automatically.")
+                                .font(.system(size: 12))
+                                .foregroundColor(.secondary)
                         }
-                        .disabled(engine.testingConnection)
+                        .padding(.vertical, 4)
+                    }
+
+                    // Test Connection Button
+                    Button {
+                        MobileHaptics.trigger(.medium)
+                        Task {
+                            _ = await engine.testAPIConnection()
+                        }
+                    } label: {
+                        HStack(spacing: 8) {
+                            if engine.testingConnection {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Image(systemName: "checkmark.shield.fill")
+                            }
+                            Text(engine.testingConnection ? "Verifying with \(config.selectedProvider.displayName)..." : (config.selectedProvider.requiresApiKey ? "Test API Key & Verify Connection" : "Test Connection"))
+                                .font(.system(size: 13, weight: .semibold))
+                        }
+                        .foregroundColor(FluidTheme.musicRed)
+                    }
+                    .disabled(engine.testingConnection || (config.selectedProvider.requiresApiKey && config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
+
+                    if let msg = engine.connectionMessage {
+                        HStack(alignment: .top, spacing: 6) {
+                            Image(systemName: msg.hasPrefix("✓") ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                .font(.system(size: 12))
+                                .foregroundColor(msg.hasPrefix("✓") ? .green : .red)
+                            Text(msg)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(msg.hasPrefix("✓") ? .green : .red)
+                        }
+                        .padding(.vertical, 2)
                     }
                 }
 

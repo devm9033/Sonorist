@@ -1,6 +1,7 @@
 import Foundation
 
 public enum AIProvider: String, Codable, CaseIterable, Identifiable, Sendable {
+    case pollinations = "pollinations"
     case gemini = "gemini"
     case groq = "groq"
     case openai = "openai"
@@ -10,8 +11,9 @@ public enum AIProvider: String, Codable, CaseIterable, Identifiable, Sendable {
 
     public var displayName: String {
         switch self {
-        case .gemini: return "Google Gemini (Free)"
-        case .groq: return "Groq - Llama 3.3 (Free)"
+        case .pollinations: return "Free (No Key / No Sign-up)"
+        case .gemini: return "Google Gemini"
+        case .groq: return "Groq - Llama 3.3 (Free Key)"
         case .openai: return "OpenAI ChatGPT"
         case .ollama: return "Local Ollama on Mac"
         }
@@ -19,6 +21,7 @@ public enum AIProvider: String, Codable, CaseIterable, Identifiable, Sendable {
 
     public var defaultModel: String {
         switch self {
+        case .pollinations: return "openai"
         case .gemini: return "gemini-3.8-flash"
         case .groq: return "llama-3.3-70b-versatile"
         case .openai: return "gpt-4o-mini"
@@ -28,6 +31,7 @@ public enum AIProvider: String, Codable, CaseIterable, Identifiable, Sendable {
 
     public var defaultEndpoint: String {
         switch self {
+        case .pollinations: return "https://text.pollinations.ai"
         case .gemini: return "https://generativelanguage.googleapis.com/v1beta/models"
         case .groq: return "https://api.groq.com/openai/v1/chat/completions"
         case .openai: return "https://api.openai.com/v1/chat/completions"
@@ -37,10 +41,18 @@ public enum AIProvider: String, Codable, CaseIterable, Identifiable, Sendable {
 
     public var instructionsURL: String {
         switch self {
+        case .pollinations: return ""
         case .gemini: return "https://aistudio.google.com/app/apikey"
         case .groq: return "https://console.groq.com/keys"
         case .openai: return "https://platform.openai.com/api-keys"
         case .ollama: return "https://ollama.com"
+        }
+    }
+
+    public var requiresApiKey: Bool {
+        switch self {
+        case .pollinations, .ollama: return false
+        case .gemini, .groq, .openai: return true
         }
     }
 }
@@ -91,7 +103,7 @@ public final class AIProviderConfig: ObservableObject, @unchecked Sendable {
     }
 
     public var isConfigured: Bool {
-        if selectedProvider == .ollama { return true }
+        if !selectedProvider.requiresApiKey { return true }
         return !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
