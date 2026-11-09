@@ -126,6 +126,14 @@ public final class MediaCacheManager: @unchecked Sendable {
         }
     }
     
+    /// Re-scans the offline library directory to synchronize newly imported or restored .sonorist bundles
+    public func reloadManifest() {
+        queue.sync {
+            loadManifest()
+            saveManifest()
+        }
+    }
+    
     // MARK: - Query & Lookup
     
     /// Checks if a track is available offline (instant zero-IO lookup with disk fallback)

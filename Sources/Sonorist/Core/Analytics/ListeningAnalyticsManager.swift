@@ -202,12 +202,23 @@ public final class ListeningAnalyticsManager: ObservableObject {
         )
         
         listeningJournal.append(event)
-        if listeningJournal.count > 150 {
-            listeningJournal.removeFirst(listeningJournal.count - 150)
+        
+        // Dynamic Rolling Cap: Allows up to ~1 MB of rich logs without exceeding
+        if listeningJournal.count > 3000 {
+            listeningJournal.removeFirst(listeningJournal.count - 3000)
         }
         
         if let data = try? JSONEncoder().encode(listeningJournal) {
-            userDefaults.set(data, forKey: kJournal)
+            if data.count > 950_000 {
+                // Safely prune oldest logs if serialized size exceeds 950 KB to stay strictly under 1 MB
+                let pruneCount = max(50, listeningJournal.count / 4)
+                listeningJournal.removeFirst(min(pruneCount, listeningJournal.count))
+                if let trimmedData = try? JSONEncoder().encode(listeningJournal) {
+                    userDefaults.set(trimmedData, forKey: kJournal)
+                }
+            } else {
+                userDefaults.set(data, forKey: kJournal)
+            }
         }
         
         // Ensure topTracks captures the listening duration
@@ -297,6 +308,43 @@ public final class ListeningAnalyticsManager: ObservableObject {
         userDefaults.removeObject(forKey: kJournal)
         userDefaults.removeObject(forKey: kStreakDays)
         userDefaults.removeObject(forKey: kLastListeningDate)
+    }
+    
+    public func restoreFromBackup(
+        totalSeconds: Double,
+        totalSongs: Int,
+        streakDays: Int,
+        topTracks: [TrackAnalytics],
+        journal: [ListeningEvent],
+        formatDist: [String: Int],
+        timeSlotDist: [TimeOfDaySlot: Int]
+    ) {
+        self.totalSecondsListened = totalSeconds
+        self.totalSongsPlayed = totalSongs
+        self.currentStreakDays = streakDays
+        self.topTracks = topTracks
+        self.listeningJournal = journal
+        self.formatDistribution = formatDist
+        self.timeSlotDistribution = timeSlotDist
+        
+        userDefaults.set(totalSeconds, forKey: kTotalSeconds)
+        userDefaults.set(totalSongs, forKey: kTotalSongs)
+        userDefaults.set(streakDays, forKey: kStreakDays)
+        
+        if let data = try? JSONEncoder().encode(topTracks) {
+            userDefaults.set(data, forKey: kTopTracks)
+        }
+        if let data = try? JSONEncoder().encode(journal) {
+            userDefaults.set(data, forKey: kJournal)
+        }
+        if let data = try? JSONEncoder().encode(formatDist) {
+            userDefaults.set(data, forKey: kFormatDist)
+        }
+        if let data = try? JSONEncoder().encode(timeSlotDist) {
+            userDefaults.set(data, forKey: kTimeSlotDist)
+        }
+        
+        recalculateArtists()
     }
     
     // MARK: - Formatting Helpers

@@ -1612,6 +1612,74 @@ struct SonoristTestsRunner {
             }
         }
         
+        // MARK: - 65. SonoristBackupManager Export & Import
+        testAsync("SonoristBackupManager: Export & Import Round-Trip Integrity") {
+            // Setup test data
+            AIProviderConfig.shared.apiKey = "test_sk_backup_12345"
+            AIProviderConfig.shared.selectedModelId = "meta-llama/llama-3.3-70b-instruct:free"
+            
+            let exportURL = try await SonoristBackupManager.exportBackup(includeAudio: false)
+            defer { try? FileManager.default.removeItem(at: exportURL) }
+            
+            guard FileManager.default.fileExists(atPath: exportURL.path) else {
+                throw TestError("Exported backup file not found on disk")
+            }
+            
+            // Clear API key in RAM to test restoration
+            AIProviderConfig.shared.apiKey = "cleared"
+            
+            // Import and verify
+            let summary = try await SonoristBackupManager.importBackup(from: exportURL)
+            guard summary.hasApiKey == true else {
+                throw TestError("Expected summary to report valid API key restored")
+            }
+            guard AIProviderConfig.shared.apiKey == "test_sk_backup_12345" else {
+                throw TestError("Expected API key to be restored accurately")
+            }
+        }
+
+        // MARK: - 66. SonoristBackupManager Security Rejection
+        testAsync("SonoristBackupManager: Corrupted Backup Rejection & Security Checksum") {
+            let corruptedData = "INVALID_CORRUPTED_BACKUP_PAYLOAD".data(using: .utf8)!
+            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("corrupted.sonorist-backup")
+            try corruptedData.write(to: tempURL)
+            defer { try? FileManager.default.removeItem(at: tempURL) }
+            
+            var didFail = false
+            do {
+                _ = try await SonoristBackupManager.importBackup(from: tempURL)
+            } catch {
+                didFail = true
+            }
+            guard didFail else {
+                throw TestError("Expected corrupted backup file to be rejected")
+            }
+        }
+
+        // MARK: - 67. ListeningAnalyticsManager 1MB Log Safety
+        test("ListeningAnalyticsManager: 1MB Log Memory Boundary & Prune Safety") {
+            let manager = ListeningAnalyticsManager.shared
+            let sampleTrack = Track(id: "overflow_test", title: "Heavy Log Track", artist: "Artist", durationSeconds: 200)
+            
+            // Simulate adding many events
+            for i in 0..<100 {
+                manager.recordListeningEvent(
+                    track: sampleTrack,
+                    secondsPlayed: 200,
+                    totalDuration: 200,
+                    wasSkipped: false,
+                    wasRepeated: i % 2 == 0,
+                    audioFormat: "Lossless (M4A)"
+                )
+            }
+            
+            if let data = try? JSONEncoder().encode(manager.listeningJournal) {
+                guard data.count <= 1_000_000 else {
+                    throw TestError("Listening journal exceeded 1 MB ceiling: \(data.count) bytes")
+                }
+            }
+        }
+        
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         print("  Results: \(passed) passed, \(failed) failed")
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")

@@ -2252,7 +2252,7 @@ public final class AudioPlayerEngine: ObservableObject {
         }
     }
 
-    private func saveLikedTracks() {
+    public func saveLikedTracks() {
         if let data = try? JSONEncoder().encode(likedTracks) {
             UserDefaults.standard.set(data, forKey: "SonoristLikedTracks")
         }
