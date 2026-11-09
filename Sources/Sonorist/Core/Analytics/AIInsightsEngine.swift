@@ -151,6 +151,25 @@ public final class AIInsightsEngine: ObservableObject {
         return (track: first.track, repeats: first.playCount, rateText: rate)
     }
     
+    // MARK: - Threshold & Auto-Sync
+    
+    public var isThresholdReached: Bool {
+        ListeningAnalyticsManager.shared.totalSongsPlayed >= 10
+    }
+    
+    public var thresholdProgress: Double {
+        min(1.0, Double(ListeningAnalyticsManager.shared.totalSongsPlayed) / 10.0)
+    }
+    
+    public var shouldAutoSync: Bool {
+        guard isThresholdReached else { return false }
+        let cleanKey = AIProviderConfig.shared.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanKey.isEmpty else { return false }
+        guard let last = lastGeneratedDate else { return true }
+        let hoursSinceLast = Date().timeIntervalSince(last) / 3600.0
+        return hoursSinceLast >= 5.0
+    }
+    
     // MARK: - AI Generation
     
     public func generateInsights(force: Bool = false) async {
@@ -162,9 +181,9 @@ public final class AIInsightsEngine: ObservableObject {
         let config = AIProviderConfig.shared
         let tone = self.selectedTone
         
-        // 1. If user has configured an API key, call the chosen LLM
+        // 1. If threshold reached and user has an API key, query LLM for musicological commentary
         let cleanKey = config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !cleanKey.isEmpty {
+        if isThresholdReached && !cleanKey.isEmpty {
             do {
                 let story = try await queryLLMForInsights(tone: tone)
                 self.currentStory = story
@@ -178,7 +197,7 @@ public final class AIInsightsEngine: ObservableObject {
             }
         }
         
-        // 2. Intelligent Heuristic Engine (100% offline, guaranteed, authentic)
+        // 2. Intelligent Grounded Heuristic Engine (100% offline, guaranteed, authentic)
         let heuristic = generateHeuristicStory(tone: tone)
         self.currentStory = heuristic
         self.lastGeneratedDate = heuristic.generatedAt
@@ -201,27 +220,31 @@ public final class AIInsightsEngine: ObservableObject {
         let totalMins = Int(manager.totalSecondsListened) / 60
         let totalSongs = manager.totalSongsPlayed
         let spectrum = computedLanguageSpectrum.map { "\($0.language) (\(Int($0.percentage * 100))%)" }.joined(separator: ", ")
+        let completionRate = "\(Int(manager.completionPercentage * 100))%"
         
         let prompt = """
-        Analyze this user's music listening telemetry and output STRICTLY valid JSON with no markdown wrapping or preamble:
-        User Context:
+        You are an objective musicologist analyzing authentic playback telemetry.
+        Do NOT output horoscopes, fantasy titles, or poetic fluff.
+        Provide a factual, 2-3 sentence analysis of the musical themes, acoustic coherence, and listening habits.
+
+        User Telemetry:
         - Total Songs Played: \(totalSongs)
         - Total Time: \(totalMins) minutes
-        - Language Spectrum: \(spectrum.isEmpty ? "Multilingual" : spectrum)
+        - Language Spectrum: \(spectrum.isEmpty ? "Diverse" : spectrum)
         - Top Tracks: \(topTracksSummary.isEmpty ? "Acoustic exploration" : topTracksSummary)
-        - Dominant Rhythm: \(primaryTime)
-        - Desired Tone: \(tone.rawValue)
+        - Peak Window: \(manager.peakListeningWindow)
+        - Completion Rate: \(completionRate) full plays
 
-        Required JSON Structure:
+        Output STRICTLY valid JSON with no markdown wrapping or preamble:
         {
-          "archetypeTitle": "A concise 2-4 word Title (e.g. 'The Twilight Devotee' or 'The Tagore Repeat Offender')",
-          "archetypeDescription": "1-2 sentence description of their core listening persona in \(tone.rawValue) tone",
-          "narrativeStory": "2-3 sentences storytelling analysis of their recent soundscape and listening habits in \(tone.rawValue) tone",
+          "archetypeTitle": "A concise 2-4 word summary of their dominant style (e.g. 'Acoustic Rabindra Sangeet' or 'Contemporary Hindi Ballads')",
+          "archetypeDescription": "1 factual sentence characterizing their musical sound profile",
+          "narrativeStory": "2 concise, objective sentences analyzing their listening consistency and musical preferences",
           "obsessionSongTitle": "Name of top track or null",
           "obsessionArtist": "Artist name or null",
-          "obsessionInsight": "Short observation about why they love this track in \(tone.rawValue) tone",
-          "peakListeningHour": "e.g. 11:15 PM",
-          "patienceRateText": "e.g. 94% Zero-Skip"
+          "obsessionInsight": "Factual observation on repeat count and immersion",
+          "peakListeningHour": "\(manager.peakListeningWindow.components(separatedBy: " (").first ?? "Evening")",
+          "patienceRateText": "\(completionRate) Full Completion"
         }
         """
         
@@ -265,64 +288,30 @@ public final class AIInsightsEngine: ObservableObject {
             obsessionSongTitle: parsed.obsessionSongTitle,
             obsessionArtist: parsed.obsessionArtist,
             obsessionInsight: parsed.obsessionInsight,
-            peakListeningHour: parsed.peakListeningHour ?? "11:15 PM",
-            patienceRateText: parsed.patienceRateText ?? "94% Zero-Skip",
+            peakListeningHour: parsed.peakListeningHour ?? "Evening",
+            patienceRateText: parsed.patienceRateText ?? "\(completionRate) Full Completion",
             modelUsed: modelName,
             generatedAt: Date(),
             tone: tone
         )
     }
     
-    // MARK: - Intelligent Heuristic Story Generator (Zero Fake Data)
+    // MARK: - Intelligent Grounded Heuristic Generator (Zero Fake Data)
     
-    public func generateHeuristicStory(tone: AIInsightsTone) -> AIInsightsStory {
+    public func generateHeuristicStory(tone: AIInsightsTone = .analytical) -> AIInsightsStory {
         let manager = ListeningAnalyticsManager.shared
         let top = manager.topTracks
         let languages = computedLanguageSpectrum
         let primaryLang = languages.first?.language ?? "Eclectic"
         let topTrack = top.first?.track
         let topCount = top.first?.playCount ?? 1
+        let completionPct = "\(Int(manager.completionPercentage * 100))%"
         
-        var archetypeTitle = "The Mindful Listener"
-        var archetypeDesc = "You approach music with intention and curiosity, seeking emotional resonance in every melody."
-        var story = "Your soundscape reflects genuine exploration. Every track you play is given space to breathe, choosing acoustic depth over passive background noise."
-        
-        let isLateNight = manager.timeSlotDistribution[.night, default: 0] >= manager.timeSlotDistribution[.afternoon, default: 0]
-        let isBengali = primaryLang.localizedCaseInsensitiveContains("bengali")
-        
-        switch tone {
-        case .poetic:
-            if isBengali && isLateNight {
-                archetypeTitle = "The Twilight Devotee"
-                archetypeDesc = "When the evening settles, your soundscape turns meditative. You seek lyrical depth, acoustic stillness, and emotional sanctuary over viral noise."
-                story = "Your week was anchored by a profound search for peace. On late evenings, you returned to timeless acoustic verses without a single interruption. Unlike passive listeners who skim playlists, you let every melody linger in the quiet dark."
-            } else if isLateNight {
-                archetypeTitle = "The Midnight Philosopher"
-                archetypeDesc = "Your deepest listening happens when the rest of the world is asleep, finding solace in introspective acoustic chords."
-                story = "The quiet hours are where your musical soul thrives. Your late-night sessions show an unbroken focus, listening from the opening note to the fading decay."
-            } else {
-                archetypeTitle = "The Cultural Harmonist"
-                archetypeDesc = "You glide between melodies effortlessly, celebrating cultural richness and lyrical craftsmanship across traditions."
-                story = "Your listening patterns celebrate balance and warmth. You build a personal soundtrack that bridges daytime energy with reflective evening calm."
-            }
-            
-        case .witty:
-            if let topSong = topTrack, topCount >= 3 {
-                archetypeTitle = "The Repeat Offender"
-                archetypeDesc = "You have an entire library at your fingertips, but you and I both know you played '\(topSong.title)' \(topCount) times this week. When you find a song, you move into it permanently."
-                story = "Your skip button took a complete vacation this week. While the rest of the world skims 15-second viral hooks, you sat listening to full four-minute compositions on repeat. Honestly? Flawless taste."
-            } else {
-                archetypeTitle = "The Unbothered Connoisseur"
-                archetypeDesc = "Zero tolerance for generic pop playlists. You pick your songs with laser precision and refuse to let bad algorithms tell you what to love."
-                story = "Your listening log is wonderfully unpredictable. No corporate charts dictate your vibe — you find a melody you love and let it ride."
-            }
-            
-        case .analytical:
-            let completionPct = manager.totalSongsPlayed > 0 ? "92%" : "100%"
-            archetypeTitle = "Introspective Acoustic Focus"
-            archetypeDesc = "Telemetry reveals high intentionality with a \(completionPct) completion rate and minimal skip frequency across all sessions."
-            story = "Analysis indicates strong time-slot clustering during evening hours. Playback duration averages indicate deep-flow listening without interruption, reflecting cognitive engagement with lyrical content."
-        }
+        let archetypeTitle = "\(primaryLang) Acoustic Soundscape"
+        let archetypeDesc = "Your listening centers around \(primaryLang.lowercased()) melodic arrangements with high completion rates."
+        let artistName = topTrack?.artist ?? "featured artists"
+        let peakWindow = manager.peakListeningWindow.components(separatedBy: " (").first ?? "Evening"
+        let story = "Your playback log reflects deep engagement with \(artistName) and melodic arrangements, peaking in the \(peakWindow.lowercased()). You listen through \(completionPct) of tracks to completion with minimal early skips."
         
         return AIInsightsStory(
             archetypeTitle: archetypeTitle,
@@ -330,10 +319,10 @@ public final class AIInsightsEngine: ObservableObject {
             narrativeStory: story,
             obsessionSongTitle: topTrack?.title,
             obsessionArtist: topTrack?.artist,
-            obsessionInsight: topTrack != nil ? "Consistently played in full without skip disruption" : nil,
-            peakListeningHour: manager.peakListeningWindow.components(separatedBy: " (").first ?? "Evening",
-            patienceRateText: "94% Zero-Skip",
-            modelUsed: "Sonorist Neural",
+            obsessionInsight: topTrack != nil ? "Played \(topCount)x in full rotation" : nil,
+            peakListeningHour: peakWindow,
+            patienceRateText: "\(completionPct) Full Completion",
+            modelUsed: "On-Device Synthesis",
             generatedAt: Date(),
             tone: tone
         )

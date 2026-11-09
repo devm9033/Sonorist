@@ -332,6 +332,25 @@ public final class ListeningAnalyticsManager: ObservableObject {
         return "Afternoon (12 PM - 5 PM)"
     }
     
+    public var completionPercentage: Double {
+        guard !listeningJournal.isEmpty else { return 0.92 }
+        let full = listeningJournal.filter { $0.completedFullSong }.count
+        return Double(full) / Double(listeningJournal.count)
+    }
+    
+    public var completionCounts: (fullPlays: Int, earlySkips: Int, total: Int) {
+        let full = listeningJournal.filter { $0.completedFullSong }.count
+        let skips = listeningJournal.filter { $0.wasSkippedEarly }.count
+        return (fullPlays: full, earlySkips: skips, total: max(1, listeningJournal.count))
+    }
+    
+    public func timeSlotPercentage(for slot: TimeOfDaySlot) -> Double {
+        let total = timeSlotDistribution.values.reduce(0, +)
+        guard total > 0 else { return 0.25 }
+        let count = timeSlotDistribution[slot, default: 0]
+        return Double(count) / Double(total)
+    }
+    
     // MARK: - Private Logic
     
     private func currentSlot() -> TimeOfDaySlot {

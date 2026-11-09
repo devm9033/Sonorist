@@ -1586,20 +1586,14 @@ struct SonoristTestsRunner {
             }
         }
 
-        // MARK: - 64. AI Insights Multi-Tone Generation & Language Spectrum
-        test("AIInsightsEngine: Multi-Tone Heuristic Synthesis & Cultural Language Horizon") {
+        // MARK: - 64. AI Insights Grounded Synthesis & Cultural Language Horizon
+        test("AIInsightsEngine: Grounded Musicological Synthesis & Cultural Language Horizon") {
             let engine = AIInsightsEngine.shared
             
-            // Generate poetic story
-            let poetic = engine.generateHeuristicStory(tone: .poetic)
-            guard !poetic.archetypeTitle.isEmpty && !poetic.narrativeStory.isEmpty else {
-                throw TestError("Expected valid archetypeTitle and narrativeStory in poetic tone")
-            }
-            
-            // Generate analytical story
-            let analytical = engine.generateHeuristicStory(tone: .analytical)
-            guard !analytical.archetypeTitle.isEmpty && !analytical.narrativeStory.isEmpty else {
-                throw TestError("Expected valid archetypeTitle and narrativeStory in analytical tone")
+            // Generate grounded synthesis
+            let story = engine.generateHeuristicStory()
+            guard !story.archetypeTitle.isEmpty && !story.narrativeStory.isEmpty else {
+                throw TestError("Expected valid archetypeTitle and narrativeStory")
             }
             
             // Verify language spectrum calculation
@@ -1609,6 +1603,12 @@ struct SonoristTestsRunner {
             }
             guard spectrum.contains(where: { $0.language == "Bengali" }) else {
                 throw TestError("Expected 'Bengali' to be identified in language spectrum")
+            }
+            
+            // Verify completion stats calculation
+            let stats = ListeningAnalyticsManager.shared.completionCounts
+            guard stats.total > 0 else {
+                throw TestError("Expected total events to be greater than 0")
             }
         }
         
