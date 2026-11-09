@@ -57,6 +57,15 @@ public struct LanguageProportion: Identifiable, Hashable {
     public let colorName: String
 }
 
+public struct GenreProportion: Identifiable, Hashable {
+    public var id: String { genre }
+    public let genre: String
+    public let count: Int
+    public let percentage: Double
+    public let colorName: String
+    public let icon: String
+}
+
 @MainActor
 public final class AIInsightsEngine: ObservableObject {
     public static let shared = AIInsightsEngine()
@@ -126,6 +135,57 @@ public final class AIInsightsEngine: ObservableObject {
                 colorName: colors[colorIdx % colors.count]
             ))
             colorIdx += 1
+        }
+        return result
+    }
+    
+    // MARK: - Musical Genre & Style Spectrum
+    
+    public var computedGenreSpectrum: [GenreProportion] {
+        let allTracks = ListeningAnalyticsManager.shared.topTracks.map { $0.track }
+        guard !allTracks.isEmpty else { return [] }
+        
+        var genreCounts: [String: Int] = [:]
+        
+        for track in allTracks {
+            let combined = "\(track.title) \(track.artist)".lowercased()
+            let genre: String
+            
+            if combined.contains("spiritual") || combined.contains("devotional") || combined.contains("bhajan") || combined.contains("kirtan") || combined.contains("worship") || combined.contains("prayer") || combined.contains("shiva") || combined.contains("krishna") || combined.contains("ram") || combined.contains("ganesh") || combined.contains("mantra") || combined.contains("aarti") || combined.contains("lead me") {
+                genre = "Devotional"
+            } else if combined.contains("rabindra") || combined.contains("tagore") || combined.contains("majhe majhe") || combined.contains("shokha") {
+                genre = "Rabindra & Folk"
+            } else if combined.contains("acoustic") || combined.contains("unplugged") || combined.contains("chill") || combined.contains("lofi") || combined.contains("guitar") || combined.contains("piano") || combined.contains("anuv jain") || combined.contains("prateek kuhad") {
+                genre = "Acoustic"
+            } else if combined.contains("dance") || combined.contains("remix") || combined.contains("party") || combined.contains("club") || combined.contains("pop") || combined.contains("badshah") || combined.contains("honey singh") || combined.contains("beat") {
+                genre = "Dance & Upbeat"
+            } else if combined.contains("rap") || combined.contains("hip hop") || combined.contains("drill") || combined.contains("sidhu") || combined.contains("karan aujla") || combined.contains("eminem") || combined.contains("drake") {
+                genre = "Hip-Hop"
+            } else if combined.contains("instrumental") || combined.contains("ambient") || combined.contains("orchestral") || combined.contains("theme") {
+                genre = "Instrumental"
+            } else {
+                genre = "Melodic & Romance"
+            }
+            
+            genreCounts[genre, default: 0] += 1
+        }
+        
+        let total = Double(max(1, allTracks.count))
+        let colors = ["teal", "emerald", "amber", "musicRed", "purple", "indigo"]
+        let icons = ["guitars.fill", "heart.fill", "sparkles", "bolt.fill", "music.note", "waveform"]
+        var result: [GenreProportion] = []
+        var idx = 0
+        
+        for (g, count) in genreCounts.sorted(by: { $0.value > $1.value }) {
+            let pct = Double(count) / total
+            result.append(GenreProportion(
+                genre: g,
+                count: count,
+                percentage: pct,
+                colorName: colors[idx % colors.count],
+                icon: icons[idx % icons.count]
+            ))
+            idx += 1
         }
         return result
     }

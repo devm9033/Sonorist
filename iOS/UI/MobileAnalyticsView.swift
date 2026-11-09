@@ -4,6 +4,7 @@ public final class MobileAnalyticsModel: ObservableObject {
     public static let shared = MobileAnalyticsModel()
     @Published public var showSettings: Bool = false
     @Published public var selectedLanguage: String? = nil
+    @Published public var selectedGenre: String? = nil
     @Published public var selectedTimeSlot: TimeOfDaySlot? = nil
     @Published public var selectedRhythmSlice: String? = nil
     @Published public var selectedMetricChip: String? = nil
@@ -43,7 +44,11 @@ public struct MobileAnalyticsView: View {
                             heroMostPlayedCard(topTrack: topTrack)
                         }
                         
-                        soundSpectrumCard
+                        if analytics.topTracks.count > 1 {
+                            topSongsCard
+                        }
+                        
+                        soundAndGenreCard
                         habitsAndRhythmsCard
                     } else {
                         // Full Music Profile (>= 10 songs)
@@ -53,22 +58,24 @@ public struct MobileAnalyticsView: View {
                             heroMostPlayedCard(topTrack: topTrack)
                         }
                         
-                        // 2. Interactive Sound & Cultural Spectrum
-                        soundSpectrumCard
+                        // 2. Top 3 Songs in Heavy Rotation
+                        if analytics.topTracks.count > 1 {
+                            topSongsCard
+                        }
                         
-                        // 3. Habits & Rhythms (Side-by-Side Circadian & Rhythm Donuts)
+                        // 3. Sound & Cultural DNA (Languages & Genres Side-by-Side Donuts)
+                        soundAndGenreCard
+                        
+                        // 4. Habits & Rhythms (Day & Night + Play vs Skip with Total Listening Time)
                         habitsAndRhythmsCard
                         
-                        // 4. Top Artists Roster
+                        // 5. Top Artists Roster
                         if !analytics.topArtists.isEmpty {
                             topArtistsCard
                         }
                         
-                        // 5. Objective Musicologist Commentary (AI or Local Grounded)
+                        // 6. Objective Musicologist Commentary (AI or Local Grounded)
                         musicologistCard
-                        
-                        // 6. Data & Streaming Usage
-                        dataFreedomCard
                     }
                 }
                 .padding(.horizontal, 16)
@@ -390,115 +397,74 @@ public struct MobileAnalyticsView: View {
         .buttonStyle(PlainButtonStyle())
     }
     
-    // MARK: - 2. Sound & Cultural Spectrum (Interactive Proportional Bar)
+    // MARK: - 2. Top Songs in Rotation
     
-    private var soundSpectrumCard: some View {
-        let spectrum = insights.computedLanguageSpectrum
-        let activeLang = model.selectedLanguage ?? spectrum.first?.language
+    private var topSongsCard: some View {
+        let topThree = Array(analytics.topTracks.prefix(3))
         
         return VStack(alignment: .leading, spacing: 12) {
             HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "globe.americas.fill")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundColor(.indigo)
-                        Text("SOUND & LANGUAGE SPECTRUM")
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
-                            .foregroundColor(.secondary)
-                    }
-                    Text("Cultural breakdown of your library")
-                        .font(.system(size: 12))
+                HStack(spacing: 6) {
+                    Image(systemName: "music.note.list")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(FluidTheme.musicRed)
+                    Text("TOP SONGS IN ROTATION")
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
                         .foregroundColor(.secondary)
                 }
                 Spacer()
-                if spectrum.isEmpty {
-                    Text("Analyzing...")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(.secondary)
-                } else {
-                    Text("\(spectrum.count) \(spectrum.count == 1 ? "Style" : "Styles")")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundColor(FluidTheme.musicRed)
-                }
+                Text("Heavy Rotation")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.secondary)
             }
             
-            if spectrum.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Capsule()
-                        .fill(Color.primary.opacity(0.06))
-                        .frame(height: 12)
+            VStack(spacing: 8) {
+                ForEach(Array(topThree.enumerated()), id: \.element.track.id) { index, item in
+                    let track = item.track
+                    let rankColor: Color = index == 0 ? FluidTheme.musicRed : (index == 1 ? .orange : .purple)
                     
-                    Text("We're still analyzing this data.")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.primary)
-                    
-                    Text("Keep playing tracks to reveal your linguistic and acoustic rotation.")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                }
-                .padding(.vertical, 4)
-            } else {
-                // Continuous Proportional Bar
-                GeometryReader { geo in
-                    HStack(spacing: 2) {
-                        ForEach(spectrum) { item in
-                            let isHighlighted = activeLang == item.language
-                            colorForName(item.colorName)
-                                .opacity(model.selectedLanguage == nil || isHighlighted ? 1.0 : 0.35)
-                                .frame(width: max(4, geo.size.width * CGFloat(item.percentage)))
+                    HStack(spacing: 12) {
+                        Text("#\(index + 1)")
+                            .font(.system(size: 13, weight: .heavy, design: .rounded))
+                            .foregroundColor(rankColor)
+                            .frame(width: 24)
+                        
+                        TrackArtworkView(
+                            url: track.artworkURL,
+                            contentMode: .fill,
+                            cornerRadius: 8,
+                            placeholderIconSize: 16
+                        )
+                        .frame(width: 40, height: 40)
+                        
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(track.title)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(.primary)
+                                .lineLimit(1)
+                            
+                            Text(track.artist)
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                        }
+                        
+                        Spacer()
+                        
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("\(item.playCount) \(item.playCount == 1 ? "play" : "plays")")
+                                .font(.system(size: 12, weight: .bold, design: .rounded))
+                                .foregroundColor(.primary)
+                            
+                            let mins = max(1, Int(item.totalSeconds / 60))
+                            Text("\(mins) mins")
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
                         }
                     }
-                    .clipShape(Capsule())
-                }
-                .frame(height: 14)
-                
-                // Interactive Language Pills
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(spectrum) { item in
-                            let isSelected = activeLang == item.language
-                            Button {
-                                MobileHaptics.trigger(.selection)
-                                withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
-                                    if model.selectedLanguage == item.language {
-                                        model.selectedLanguage = nil
-                                    } else {
-                                        model.selectedLanguage = item.language
-                                    }
-                                }
-                            } label: {
-                                HStack(spacing: 5) {
-                                    Circle()
-                                        .fill(colorForName(item.colorName))
-                                        .frame(width: 8, height: 8)
-                                    Text("\(item.language) \(Int(item.percentage * 100))%")
-                                        .font(.system(size: 11, weight: isSelected ? .bold : .medium))
-                                        .foregroundColor(isSelected ? .white : .primary)
-                                }
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(
-                                    Capsule()
-                                        .fill(isSelected ? colorForName(item.colorName) : Color.primary.opacity(0.05))
-                                )
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                        }
-                    }
-                }
-                
-                // Contextual Detail for Selected Language
-                if let target = spectrum.first(where: { $0.language == activeLang }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "info.circle")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
-                        Text("\(target.count) \(target.count == 1 ? "song" : "songs") in \(target.language) • \(Int(target.percentage * 100))% of your listening • Still analyzing as library grows")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.top, 2)
+                    .padding(8)
+                    .background(Color.primary.opacity(0.03))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 }
             }
         }
@@ -506,31 +472,290 @@ public struct MobileAnalyticsView: View {
         .background(cardBackground)
     }
     
-    // MARK: - 3. Habits & Rhythms (Side-by-Side Donut Charts)
+    // MARK: - 3. Sound & Cultural DNA (Languages & Genres Side-by-Side Donuts)
+    
+    private var soundAndGenreCard: some View {
+        let languages = insights.computedLanguageSpectrum
+        let genres = insights.computedGenreSpectrum
+        let hasData = !languages.isEmpty
+        
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                HStack(spacing: 6) {
+                    Image(systemName: "globe.americas.fill")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(.indigo)
+                    Text("SOUND & CULTURAL DNA")
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+                if hasData {
+                    Text("Tap to inspect")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                } else {
+                    Text("Analyzing...")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            // Side-by-Side Pie / Donut Charts
+            HStack(alignment: .top, spacing: 16) {
+                languageDonutView
+                    .frame(maxWidth: .infinity)
+                
+                Rectangle()
+                    .fill(Color.primary.opacity(0.08))
+                    .frame(width: 1, height: 110)
+                
+                genreDonutView
+                    .frame(maxWidth: .infinity)
+            }
+            .padding(.vertical, 4)
+            
+            // Interactive Detail Bar
+            if let lang = model.selectedLanguage, let target = languages.first(where: { $0.language == lang }) {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(colorForName(target.colorName))
+                        .frame(width: 7, height: 7)
+                    Text("\(target.language): \(target.count) \(target.count == 1 ? "track" : "tracks") (\(Int(target.percentage * 100))% of rotation)")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.primary)
+                }
+                .padding(.top, 2)
+            } else if let gen = model.selectedGenre, let target = genres.first(where: { $0.genre == gen }) {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(colorForName(target.colorName))
+                        .frame(width: 7, height: 7)
+                    Text("\(target.genre): \(target.count) \(target.count == 1 ? "track" : "tracks") (\(Int(target.percentage * 100))% of styles)")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.primary)
+                }
+                .padding(.top, 2)
+            } else if !hasData {
+                Text("We're still analyzing this data. Keep listening to reveal your language and style breakdown.")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(16)
+        .background(cardBackground)
+    }
+    
+    private var languageDonutView: some View {
+        let languages = insights.computedLanguageSpectrum
+        let hasData = !languages.isEmpty
+        let topLang = languages.first
+        
+        let slices: [(start: Double, end: Double, color: Color)] = {
+            var acc = 0.0
+            var res: [(start: Double, end: Double, color: Color)] = []
+            for item in languages {
+                let s = acc
+                let e = acc + item.percentage
+                acc = e
+                res.append((s, e, colorForName(item.colorName)))
+            }
+            return res
+        }()
+        
+        return Button {
+            MobileHaptics.trigger(.selection)
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
+                if let curr = model.selectedLanguage,
+                   let currIdx = languages.firstIndex(where: { $0.language == curr }),
+                   currIdx + 1 < languages.count {
+                    model.selectedLanguage = languages[currIdx + 1].language
+                } else {
+                    model.selectedLanguage = languages.first?.language
+                }
+            }
+        } label: {
+            VStack(spacing: 8) {
+                ZStack {
+                    Circle()
+                        .stroke(Color.primary.opacity(0.08), lineWidth: 10)
+                        .frame(width: 82, height: 82)
+                    
+                    if hasData {
+                        ForEach(Array(slices.enumerated()), id: \.offset) { _, slice in
+                            Circle()
+                                .trim(from: CGFloat(slice.start), to: CGFloat(slice.end))
+                                .stroke(slice.color, style: StrokeStyle(lineWidth: 10, lineCap: .butt))
+                                .frame(width: 82, height: 82)
+                                .rotationEffect(.degrees(-90))
+                        }
+                    }
+                    
+                    VStack(spacing: 2) {
+                        if hasData, let top = topLang {
+                            let active = languages.first(where: { $0.language == model.selectedLanguage }) ?? top
+                            let code = String(active.language.prefix(2)).uppercased()
+                            Text(code)
+                                .font(.system(size: 13, weight: .heavy, design: .rounded))
+                                .foregroundColor(colorForName(active.colorName))
+                            Text("\(Int(active.percentage * 100))%")
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                                .foregroundColor(.primary)
+                        } else {
+                            Image(systemName: "globe.americas.fill")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundColor(.secondary)
+                            Text("Analyzing")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+                
+                VStack(spacing: 2) {
+                    Text("Languages")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(.primary)
+                    
+                    if hasData, let top = topLang {
+                        let active = languages.first(where: { $0.language == model.selectedLanguage }) ?? top
+                        Text(active.language)
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    } else {
+                        Text("Still analyzing")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+    
+    private var genreDonutView: some View {
+        let genres = insights.computedGenreSpectrum
+        let hasData = !genres.isEmpty
+        let topGenre = genres.first
+        
+        let slices: [(start: Double, end: Double, color: Color)] = {
+            var acc = 0.0
+            var res: [(start: Double, end: Double, color: Color)] = []
+            for item in genres {
+                let s = acc
+                let e = acc + item.percentage
+                acc = e
+                res.append((s, e, colorForName(item.colorName)))
+            }
+            return res
+        }()
+        
+        return Button {
+            MobileHaptics.trigger(.selection)
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
+                if let curr = model.selectedGenre,
+                   let currIdx = genres.firstIndex(where: { $0.genre == curr }),
+                   currIdx + 1 < genres.count {
+                    model.selectedGenre = genres[currIdx + 1].genre
+                } else {
+                    model.selectedGenre = genres.first?.genre
+                }
+            }
+        } label: {
+            VStack(spacing: 8) {
+                ZStack {
+                    Circle()
+                        .stroke(Color.primary.opacity(0.08), lineWidth: 10)
+                        .frame(width: 82, height: 82)
+                    
+                    if hasData {
+                        ForEach(Array(slices.enumerated()), id: \.offset) { _, slice in
+                            Circle()
+                                .trim(from: CGFloat(slice.start), to: CGFloat(slice.end))
+                                .stroke(slice.color, style: StrokeStyle(lineWidth: 10, lineCap: .butt))
+                                .frame(width: 82, height: 82)
+                                .rotationEffect(.degrees(-90))
+                        }
+                    }
+                    
+                    VStack(spacing: 2) {
+                        if hasData, let top = topGenre {
+                            let active = genres.first(where: { $0.genre == model.selectedGenre }) ?? top
+                            Image(systemName: active.icon)
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(colorForName(active.colorName))
+                            Text("\(Int(active.percentage * 100))%")
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                                .foregroundColor(.primary)
+                        } else {
+                            Image(systemName: "guitars.fill")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundColor(.secondary)
+                            Text("Analyzing")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+                
+                VStack(spacing: 2) {
+                    Text("Genres & Styles")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(.primary)
+                    
+                    if hasData, let top = topGenre {
+                        let active = genres.first(where: { $0.genre == model.selectedGenre }) ?? top
+                        Text(active.genre)
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    } else {
+                        Text("Still analyzing")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+    
+    // MARK: - 4. Habits & Rhythms (Side-by-Side Donut Charts)
     
     private var habitsAndRhythmsCard: some View {
         let stats = analytics.completionCounts
         
         return VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                HStack(spacing: 6) {
-                    Image(systemName: "chart.pie.fill")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundColor(FluidTheme.musicRed)
-                    Text("HABITS & RHYTHMS")
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
-                        .foregroundColor(.secondary)
-                }
-                Spacer()
-                if !analytics.hasCircadianData && !analytics.hasJournalData {
-                    Text("Analyzing...")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(.secondary)
-                } else {
-                    Text("Tap charts for details")
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chart.pie.fill")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(FluidTheme.musicRed)
+                        Text("HABITS & RHYTHMS")
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .foregroundColor(.secondary)
+                    }
+                    Text("Day & night listening patterns")
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
                 }
+                Spacer()
+                
+                // Embedded Total Listening Time
+                HStack(spacing: 4) {
+                    Image(systemName: "clock.fill")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(FluidTheme.musicRed)
+                    Text(analytics.formattedTotalTime)
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundColor(.primary)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.primary.opacity(0.04))
+                .clipShape(Capsule())
             }
             
             // Side-by-Side Pie / Donut Charts
@@ -899,12 +1124,17 @@ public struct MobileAnalyticsView: View {
         
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
-                HStack(spacing: 6) {
-                    Image(systemName: "text.quote")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundColor(FluidTheme.musicRed)
-                    Text("MUSICOLOGIST ANALYSIS")
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "text.quote")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(FluidTheme.musicRed)
+                        Text("MUSICOLOGIST SUMMARY")
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .foregroundColor(.secondary)
+                    }
+                    Text("Synthesizes your musical themes, artist coherence & habits")
+                        .font(.system(size: 11))
                         .foregroundColor(.secondary)
                 }
                 Spacer()
@@ -913,10 +1143,11 @@ public struct MobileAnalyticsView: View {
                     .foregroundColor(.secondary)
             }
             
-            Text(story?.narrativeStory ?? "Your listening patterns show deep engagement with melodic acoustic arrangements, listening through songs with high consistency.")
+            Text(story?.narrativeStory ?? "Your listening patterns show authentic engagement with acoustic and melodic arrangements, listening through songs with high consistency.")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundColor(.primary)
                 .lineSpacing(3)
+                .padding(.vertical, 2)
             
             if !hasAPIKey {
                 Divider()
@@ -926,10 +1157,10 @@ public struct MobileAnalyticsView: View {
                     model.showSettings = true
                 } label: {
                     HStack(spacing: 6) {
-                        Image(systemName: "key.fill")
+                        Image(systemName: "sparkles")
                             .font(.system(size: 10))
                             .foregroundColor(FluidTheme.musicRed)
-                        Text("Connect API Key in Settings for deep LLM commentary")
+                        Text("Connect API Key in Settings for deep musicological commentary")
                             .font(.system(size: 11, weight: .medium))
                             .foregroundColor(FluidTheme.musicRed)
                         Spacer()
@@ -949,79 +1180,6 @@ public struct MobileAnalyticsView: View {
                         .foregroundColor(.secondary.opacity(0.8))
                 }
                 .padding(.top, 2)
-            }
-        }
-        .padding(16)
-        .background(cardBackground)
-    }
-    
-    // MARK: - 7. Data & Streaming Usage
-    
-    private var dataFreedomCard: some View {
-        let offlinePlays = analytics.formatDistribution["Offline Cached", default: 0]
-        let totalPlays = analytics.totalSongsPlayed
-        let onlinePlays = max(0, totalPlays - offlinePlays)
-        
-        let savedMB = (offlinePlays * 38) / 10 // ~3.8 MB saved per cached play
-        let spentMB = (onlinePlays * 38) / 10  // ~3.8 MB per online stream
-        
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                HStack(spacing: 6) {
-                    Image(systemName: "antenna.radiowaves.left.and.right")
-                        .foregroundColor(.indigo)
-                        .font(.system(size: 12, weight: .bold))
-                    Text("DATA & STREAMING USAGE")
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
-                        .foregroundColor(.secondary)
-                }
-                Spacer()
-                Text("Cellular Telemetry")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(.secondary)
-            }
-            
-            HStack(spacing: 10) {
-                // 1. Time Listened
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(analytics.formattedTotalTime)
-                        .font(.system(size: 16, weight: .bold, design: .rounded))
-                    Text("Time listened")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
-                .background(Color.primary.opacity(0.04))
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                
-                // 2. Cellular Spent
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("\(spentMB) MB")
-                        .font(.system(size: 16, weight: .bold, design: .rounded))
-                        .foregroundColor(spentMB > 0 ? .orange : .primary)
-                    Text("Cellular spent")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
-                .background(Color.primary.opacity(0.04))
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                
-                // 3. Cellular Saved
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("\(savedMB) MB")
-                        .font(.system(size: 16, weight: .bold, design: .rounded))
-                        .foregroundColor(FluidTheme.downloadGreen)
-                    Text("Saved offline")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
-                .background(Color.primary.opacity(0.04))
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
         }
         .padding(16)
