@@ -1814,6 +1814,46 @@ struct SonoristTestsRunner {
             }
         }
         
+        // MARK: - 72. MediaCacheManager Artwork Extraction & Clear
+        testAsync("MediaCacheManager: Artwork Cache Lifecycle & Restore Extraction") {
+            let cache = MediaCacheManager.shared
+            let testId = "test_artwork_extract_999"
+            let dummyAudio = Data(repeating: 0x55, count: 512)
+            let dummyArt = Data(repeating: 0xFF, count: 256)
+            let dummyTrack = Track(id: testId, title: "Art Test Track", artist: "Artist", durationSeconds: 200)
+            
+            let bundleData = try SonoristBundleEngine.pack(track: dummyTrack, audioData: dummyAudio, artworkData: dummyArt)
+            let bundleFile = cache.libraryDirectory.appendingPathComponent("\(testId).sonorist")
+            try bundleData.write(to: bundleFile)
+            defer { try? FileManager.default.removeItem(at: bundleFile) }
+            
+            cache.reloadManifest()
+            
+            let exportURL = try await SonoristBackupManager.exportSongsBackup()
+            defer { try? FileManager.default.removeItem(at: exportURL) }
+            
+            // Delete both bundle and extracted art
+            try? FileManager.default.removeItem(at: bundleFile)
+            let artFile = cache.artworkDirectory.appendingPathComponent("\(testId).jpg")
+            try? FileManager.default.removeItem(at: artFile)
+            
+            // Import backup - should restore bundle AND extract artwork to disk
+            _ = try await SonoristBackupManager.importBackup(from: exportURL)
+            
+            guard FileManager.default.fileExists(atPath: artFile.path) else {
+                throw TestError("Expected artwork file to be extracted to disk during restore")
+            }
+            
+            // Verify clearArtworkCache removes all artwork
+            cache.clearArtworkCache()
+            guard !FileManager.default.fileExists(atPath: artFile.path) else {
+                throw TestError("Expected clearArtworkCache to remove artwork file from disk")
+            }
+            guard cache.getArtworkCacheSizeBytes() == 0 else {
+                throw TestError("Expected artwork cache size to be 0 after clearArtworkCache")
+            }
+        }
+        
         // Final cleanup: Never leave test telemetry in user preferences
         ListeningAnalyticsManager.shared.resetAll()
         

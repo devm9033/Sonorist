@@ -690,6 +690,24 @@ public final class AudioPlayerEngine: ObservableObject {
 
                 self.startPlayer(with: streamURL, track: updatedTrack, autoPlay: autoPlay, seekTo: seekTo)
 
+                // Self-healing: Ensure album art is cached on disk, downloading in background if missing
+                let currentId = updatedTrack.id
+                let hasLocalArt = updatedTrack.artworkURL != nil && FileManager.default.fileExists(atPath: updatedTrack.artworkURL?.path ?? "")
+                if !hasLocalArt && !currentId.hasPrefix("local_") {
+                    Task.detached(priority: .utility) { [weak self] in
+                        if let restoredURL = await MediaCacheManager.shared.ensureArtwork(for: updatedTrack) {
+                            await MainActor.run {
+                                if self?.currentTrack?.id == currentId {
+                                    self?.currentTrack?.artworkURL = restoredURL
+                                    if let cur = self?.currentTrack {
+                                        self?.updateNowPlaying(track: cur)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Fetch synced lyrics in background
                 await self.loadLyrics(for: updatedTrack)
 

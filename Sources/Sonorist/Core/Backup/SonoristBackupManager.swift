@@ -383,6 +383,15 @@ public enum SonoristBackupManager {
                 progressHandler?(0.05 + progress * 0.90, "Restoring: \(trackTitle)", index + 1, totalCount)
             }
             
+            // Extract embedded album art directly to ArtworkCache for instant display
+            if let meta = try? SonoristBundleEngine.readMetadataOnly(from: bundleData),
+               let artData = meta.artworkData, !artData.isEmpty {
+                let artFileURL = cache.artworkDirectory.appendingPathComponent("\(trackId).jpg")
+                if !FileManager.default.fileExists(atPath: artFileURL.path) {
+                    try? artData.write(to: artFileURL, options: .atomic)
+                }
+            }
+            
             // Pacing sleep (20ms) so the restore loading bar visibly moves
             try? await Task.sleep(nanoseconds: 20_000_000)
         }

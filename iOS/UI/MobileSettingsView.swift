@@ -7,8 +7,10 @@ import UIKit
 public final class MobileSettingsModel: ObservableObject {
     public static let shared = MobileSettingsModel()
     @Published public var showClearCacheAlert: Bool = false
+    @Published public var showClearArtworkAlert: Bool = false
     @Published public var showResetListeningAlert: Bool = false
     @Published public var cacheSizeText: String = "Calculating..."
+    @Published public var artworkCacheSizeText: String = "Calculating..."
     @Published public var cacheSizeBytes: Int64 = 0
     @Published public var storageLimitGB: Double = 5.0
     @Published public var showEqualizerSheet: Bool = false
@@ -534,7 +536,24 @@ public struct MobileSettingsView: View {
                         }
                     }
                     
-                    // 4. Reset Listening History Button
+                    // 4. Clear Album Art Cache Button
+                    Button(role: .destructive) {
+                        MobileHaptics.trigger(.medium)
+                        model.showClearArtworkAlert = true
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "photo.stack")
+                                .font(.system(size: 14, weight: .medium))
+                            Text("Clear Album Art Cache")
+                                .font(.system(size: 15, weight: .medium))
+                            Spacer()
+                            Text(model.artworkCacheSizeText)
+                                .font(.system(size: 13))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    
+                    // 5. Reset Listening History Button
                     Button(role: .destructive) {
                         MobileHaptics.trigger(.medium)
                         model.showResetListeningAlert = true
@@ -669,6 +688,14 @@ public struct MobileSettingsView: View {
         } message: {
             Text("This will remove all downloaded offline songs and temporary stream buffers.")
         }
+        .alert("Clear Album Art Cache?", isPresented: $model.showClearArtworkAlert) {
+            Button("Cancel", role: .cancel) {}
+            Button("Clear All", role: .destructive) {
+                clearArtworkCache()
+            }
+        } message: {
+            Text("This will delete all locally stored album art thumbnails (\(model.artworkCacheSizeText)). Missing artwork will automatically re-download when songs are played.")
+        }
         .alert("Reset Listening History?", isPresented: $model.showResetListeningAlert) {
             Button("Cancel", role: .cancel) {}
             Button("Reset All", role: .destructive) {
@@ -766,9 +793,13 @@ public struct MobileSettingsView: View {
             formatter.countStyle = .file
             let formatted = formatter.string(fromByteCount: finalBytes)
             
+            let artBytes = cache.getArtworkCacheSizeBytes()
+            let formattedArt = formatter.string(fromByteCount: artBytes)
+            
             await MainActor.run {
                 model.cacheSizeBytes = finalBytes
                 model.cacheSizeText = formatted
+                model.artworkCacheSizeText = formattedArt
             }
         }
     }
@@ -778,6 +809,16 @@ public struct MobileSettingsView: View {
             await MainActor.run {
                 AudioPlayerEngine.shared.clearAllOfflineDownloads()
                 MobileToastManager.shared.show(message: "Library & Cache Cleared", icon: "trash")
+            }
+            await self.calculateCacheSize()
+        }
+    }
+    
+    private func clearArtworkCache() {
+        Task.detached(priority: .userInitiated) {
+            MediaCacheManager.shared.clearArtworkCache()
+            await MainActor.run {
+                MobileToastManager.shared.show(message: "Album Art Cache Cleared", icon: "photo")
             }
             await self.calculateCacheSize()
         }
