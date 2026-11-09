@@ -42,75 +42,80 @@ public struct MobileLibraryView: View {
     
     public var body: some View {
         NavigationStack {
-            List {
-                // 1. Segment Selector & Library Controls Header
-                segmentSelectorSection
-                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 6, trailing: 16))
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-
-                // 2. Playlists Folder Row (When on Downloaded segment)
-                if model.selectedSegment == .downloaded {
-                    playlistsFolderRow
-                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
-                }
-
-                // 3. Tracks or Empty State
-                let tracks = currentTracks
-                if tracks.isEmpty {
-                    VStack(spacing: 12) {
-                        Image(systemName: model.selectedSegment == .downloaded ? "arrow.down.circle" : "heart.slash")
-                            .font(.system(size: 40))
-                            .foregroundColor(.secondary.opacity(0.6))
+            VStack(spacing: 0) {
+                // Header (Pinned comfortably below Dynamic Island / status bar, identical to Page 1 & Page 3)
+                HStack(alignment: .center) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Library")
+                            .font(.system(size: 28, weight: .bold, design: .rounded))
                         
-                        Text(model.selectedSegment == .downloaded ? "No Offline Tracks" : "No Favorites Yet")
-                            .font(.system(size: 16, weight: .semibold, design: .rounded))
-                        
-                        Text(model.selectedSegment == .downloaded ? "Tracks downloaded in Sonorist will appear here for zero-data listening." : "Tap the heart on any song to save it to your favorites.")
-                            .font(.system(size: 13))
+                        Text("Offline downloads & favorites")
+                            .font(.system(size: 13, weight: .medium))
                             .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 32)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, 40)
-                    .listRowInsets(EdgeInsets())
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-                } else {
-                    ForEach(tracks, id: \.id) { track in
-                        libraryTrackRow(for: track)
-                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                    
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+                .padding(.bottom, 8)
+
+                // Segment Selector (Downloaded / Favorites) & Storage Badge
+                segmentSelectorSection
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 6)
+
+                // Content List
+                List {
+                    // Playlists Folder Row (When on Downloaded segment)
+                    if model.selectedSegment == .downloaded {
+                        playlistsFolderRow
+                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
                             .listRowSeparator(.hidden)
                             .listRowBackground(Color.clear)
-                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                if model.selectedSegment == .downloaded || MediaCacheManager.shared.isCached(videoId: track.id) {
-                                    Button(role: .destructive) {
-                                        player.removeDownloadedTrack(track: track)
-                                    } label: {
-                                        Label("Remove", systemImage: "trash")
+                    }
+
+                    // Tracks or Empty State
+                    let tracks = currentTracks
+                    if tracks.isEmpty {
+                        emptyStateView
+                            .listRowInsets(EdgeInsets())
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                    } else {
+                        ForEach(tracks, id: \.id) { track in
+                            libraryTrackRow(for: track)
+                                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
+                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                    if model.selectedSegment == .downloaded || MediaCacheManager.shared.isCached(videoId: track.id) {
+                                        Button(role: .destructive) {
+                                            player.removeDownloadedTrack(track: track)
+                                        } label: {
+                                            Label("Remove", systemImage: "trash")
+                                        }
                                     }
                                 }
-                            }
+                        }
                     }
                 }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .safeAreaInset(edge: .bottom) {
+                    Color.clear.frame(height: 180)
+                }
+                .refreshable {
+                    MobileHaptics.trigger(.medium)
+                    model.loadOfflineTracks()
+                    await AIPlaylistEngine.shared.reconcileWithCachedTracks()
+                }
+                .id(model.refreshID)
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .safeAreaInset(edge: .bottom) {
-                Color.clear.frame(height: 180)
-            }
-            .refreshable {
-                MobileHaptics.trigger(.medium)
-                model.loadOfflineTracks()
-                await AIPlaylistEngine.shared.reconcileWithCachedTracks()
-            }
-            .id(model.refreshID)
             .navigationTitle("Library")
             #if os(iOS)
-            .navigationBarTitleDisplayMode(.large)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.hidden, for: .navigationBar)
             #endif
             .background(Color.platformSystemBackground.ignoresSafeArea())
         }
@@ -138,6 +143,25 @@ public struct MobileLibraryView: View {
         } message: {
             Text("This will permanently delete all \(model.offlineTracks.count) downloaded songs and free \(MediaCacheManager.shared.getFormattedCacheSize()) of storage on your iPhone.")
         }
+    }
+
+    private var emptyStateView: some View {
+        VStack(spacing: 12) {
+            Image(systemName: model.selectedSegment == .downloaded ? "arrow.down.circle" : "heart.slash")
+                .font(.system(size: 40))
+                .foregroundColor(.secondary.opacity(0.6))
+            
+            Text(model.selectedSegment == .downloaded ? "No Offline Tracks" : "No Favorites Yet")
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
+            
+            Text(model.selectedSegment == .downloaded ? "Tracks downloaded in Sonorist will appear here for zero-data listening." : "Tap the heart on any song to save it to your favorites.")
+                .font(.system(size: 13))
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 40)
     }
 
     // MARK: - Segment Selector & Controls Section (Clean native scrollable header)

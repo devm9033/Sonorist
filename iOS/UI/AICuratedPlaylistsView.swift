@@ -59,7 +59,8 @@ public struct AICuratedPlaylistsFolderView: View {
         }
         .navigationTitle("Playlists")
         #if os(iOS)
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.visible, for: .navigationBar)
         #endif
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
