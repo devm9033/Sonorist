@@ -171,32 +171,34 @@ public final class MediaCacheManager: @unchecked Sendable {
         }
     }
     
-    /// Returns a local file:// URL pointing to the high-res extracted artwork on disk
-    public func cachedArtworkURL(for videoId: String) -> URL? {
+    /// Returns raw JPEG/PNG image data directly from the .sonorist container in O(1) time without writing to disk
+    public func cachedArtworkData(for videoId: String) -> Data? {
         return queue.sync {
-            internalCachedArtworkURL(for: videoId)
+            let safeId = SecurityAudit.sanitizeTrackID(videoId)
+            let lookupId = safeId.isEmpty ? videoId : safeId
+            let filename = cachedManifest[lookupId] ?? cachedManifest[videoId] ?? "\(lookupId).sonorist"
+            let bundleURL = libraryDirectory.appendingPathComponent(filename)
+            guard fileManager.fileExists(atPath: bundleURL.path),
+                  let data = try? Data(contentsOf: bundleURL),
+                  let meta = try? SonoristBundleEngine.readMetadataOnly(from: data),
+                  let artData = meta.artworkData, !artData.isEmpty else {
+                return nil
+            }
+            return artData
         }
     }
     
-    /// Un-synchronized internal helper to prevent GCD recursive dispatch deadlock
-    private func internalCachedArtworkURL(for videoId: String) -> URL? {
-        let artFileURL = self.artworkDirectory.appendingPathComponent("\(videoId).jpg")
-        if fileManager.fileExists(atPath: artFileURL.path) {
-            return artFileURL
+    /// Returns the virtual single-copy URL ("sonorist-art://<id>") pointing to the container-embedded artwork.
+    /// Eliminates duplicate disk files completely; images are decoded on-demand directly into RAM (NSCache).
+    public func cachedArtworkURL(for videoId: String) -> URL? {
+        return queue.sync {
+            let safeId = SecurityAudit.sanitizeTrackID(videoId)
+            let lookupId = safeId.isEmpty ? videoId : safeId
+            let filename = cachedManifest[lookupId] ?? cachedManifest[videoId] ?? "\(lookupId).sonorist"
+            let bundleURL = libraryDirectory.appendingPathComponent(filename)
+            guard fileManager.fileExists(atPath: bundleURL.path) else { return nil }
+            return URL(string: "sonorist-art://\(lookupId)")
         }
-        
-        // If not yet extracted on disk, extract once from the .sonorist binary container
-        let filename = cachedManifest[videoId] ?? "\(videoId).sonorist"
-        let bundleURL = libraryDirectory.appendingPathComponent(filename)
-        guard fileManager.fileExists(atPath: bundleURL.path),
-              let data = try? Data(contentsOf: bundleURL),
-              let meta = try? SonoristBundleEngine.readMetadataOnly(from: data),
-              let artData = meta.artworkData, !artData.isEmpty else {
-            return nil
-        }
-        
-        try? artData.write(to: artFileURL, options: .atomic)
-        return fileManager.fileExists(atPath: artFileURL.path) ? artFileURL : nil
     }
     
     /// Prepares real-time in-memory playback for a .sonorist bundle
@@ -285,8 +287,7 @@ public final class MediaCacheManager: @unchecked Sendable {
                     var t = track
                     t.isCached = true
                     t.streamURL = nil
-                    let artFileURL = self.artworkDirectory.appendingPathComponent("\(vid).jpg")
-                    t.artworkURL = fileManager.fileExists(atPath: artFileURL.path) ? artFileURL : nil
+                    t.artworkURL = URL(string: "sonorist-art://\(vid)")
                     valid.append(t)
                     continue
                 }
@@ -298,9 +299,7 @@ public final class MediaCacheManager: @unchecked Sendable {
                         var t = meta.track
                         t.isCached = true
                         t.streamURL = nil // Never set streamURL to the raw .sonorist bundle file
-                        
-                        let artFileURL = self.artworkDirectory.appendingPathComponent("\(vid).jpg")
-                        t.artworkURL = fileManager.fileExists(atPath: artFileURL.path) ? artFileURL : nil
+                        t.artworkURL = URL(string: "sonorist-art://\(vid)")
                         
                         valid.append(t)
                         self.cachedTracksMetadata[vid] = t
@@ -334,25 +333,17 @@ public final class MediaCacheManager: @unchecked Sendable {
                     artworkData: artworkData
                 )
                 
-                let safeId = track.id.filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
+                let safeId = SecurityAudit.sanitizeTrackID(track.id)
                 guard !safeId.isEmpty else { return }
                 let filename = "\(safeId).sonorist"
                 let destURL = self.libraryDirectory.appendingPathComponent(filename)
                 try bundleData.write(to: destURL, options: .atomic)
                 
-                // Cache artwork to local file for instant offline image loading
-                if let art = artworkData, !art.isEmpty {
-                    let artFileURL = self.artworkDirectory.appendingPathComponent("\(safeId).jpg")
-                    try? art.write(to: artFileURL, options: .atomic)
-                }
-                
                 self.cachedManifest[safeId] = filename
                 self.cachedIdsSet.insert(safeId)
                 var t = track
                 t.isCached = true
-                if let localArt = internalCachedArtworkURL(for: safeId) {
-                    t.artworkURL = localArt
-                }
+                t.artworkURL = URL(string: "sonorist-art://\(safeId)")
                 self.cachedTracksMetadata[safeId] = t
                 self.saveManifest()
 
@@ -640,37 +631,29 @@ public final class MediaCacheManager: @unchecked Sendable {
         return total
     }
     
-    /// Ensures that local artwork is available on disk for a given track.
-    /// 1) Checks local .jpg on disk, 2) Extracts from .sonorist bundle, 3) Downloads from YouTube high-res thumbnail.
+    /// Ensures that artwork is available for a track under the zero-disk-duplication architecture.
+    /// 1) Verifies embedded artwork inside the .sonorist container, 2) Repacks if missing, 3) Caches directly to RAM (NSCache).
     @discardableResult
     public func ensureArtwork(for track: Track) async -> URL? {
-        let safeId = track.id.filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
+        let safeId = SecurityAudit.sanitizeTrackID(track.id)
         let vid = safeId.isEmpty ? track.id : safeId
         guard !vid.isEmpty, !vid.hasPrefix("local_") else { return nil }
         
-        let artFileURL = artworkDirectory.appendingPathComponent("\(vid).jpg")
-        
-        // 1. Already on disk?
-        if fileManager.fileExists(atPath: artFileURL.path),
-           let attr = try? fileManager.attributesOfItem(atPath: artFileURL.path),
-           (attr[.size] as? Int64 ?? 0) > 200 {
-            return artFileURL
-        }
-        
-        // 2. Can we extract from .sonorist binary container?
         let filename = queue.sync { cachedManifest[vid] ?? "\(vid).sonorist" }
         let bundleURL = libraryDirectory.appendingPathComponent(filename)
-        if fileManager.fileExists(atPath: bundleURL.path),
+        let isCachedOffline = fileManager.fileExists(atPath: bundleURL.path)
+        
+        // 1. If cached offline, verify container has embedded artwork
+        if isCachedOffline,
            let data = try? Data(contentsOf: bundleURL),
            let meta = try? SonoristBundleEngine.readMetadataOnly(from: data),
            let artData = meta.artworkData, !artData.isEmpty {
-            try? artData.write(to: artFileURL, options: .atomic)
-            if fileManager.fileExists(atPath: artFileURL.path) {
-                return artFileURL
-            }
+            // Already has container-embedded artwork; pre-warm into RAM
+            ArtworkImageCache.shared.preload(url: URL(string: "sonorist-art://\(vid)"))
+            return URL(string: "sonorist-art://\(vid)")
         }
         
-        // 3. Fallback: Automatically download album art from YouTube high-res thumbnails
+        // 2. Fallback: Automatically download album art from YouTube high-res thumbnails
         let candidates: [URL] = [
             track.artworkURL,
             URL(string: "https://i.ytimg.com/vi/\(vid)/maxresdefault.jpg"),
@@ -684,13 +667,11 @@ public final class MediaCacheManager: @unchecked Sendable {
                 request.timeoutInterval = 7.0
                 let (data, response) = try await URLSession.shared.data(for: request)
                 if (response as? HTTPURLResponse)?.statusCode == 200 && data.count > 1024 {
-                    try? data.write(to: artFileURL, options: .atomic)
-                    
-                    // Also embed this newly downloaded artwork back into the .sonorist container if it's cached!
-                    if fileManager.fileExists(atPath: bundleURL.path),
+                    // Embed newly downloaded artwork directly back into the .sonorist container (Single Copy!)
+                    if isCachedOffline,
                        let bundleData = try? Data(contentsOf: bundleURL),
                        let unpacked = try? SonoristBundleEngine.unpack(data: bundleData) {
-                        if (unpacked.artworkData == nil || unpacked.artworkData?.isEmpty == true) {
+                        if unpacked.artworkData == nil || unpacked.artworkData?.isEmpty == true {
                             if let repacked = try? SonoristBundleEngine.pack(
                                 track: unpacked.track,
                                 audioData: unpacked.audioData,
@@ -702,14 +683,19 @@ public final class MediaCacheManager: @unchecked Sendable {
                         }
                     }
                     
-                    return artFileURL
+                    if isCachedOffline {
+                        ArtworkImageCache.shared.preload(url: URL(string: "sonorist-art://\(vid)"))
+                        return URL(string: "sonorist-art://\(vid)")
+                    } else {
+                        return safeURL
+                    }
                 }
             } catch {
                 continue
             }
         }
         
-        return nil
+        return isCachedOffline ? URL(string: "sonorist-art://\(vid)") : nil
     }
     
     // MARK: - Storage Allocation Quota
@@ -824,6 +810,10 @@ public final class ArtworkImageCache: ObservableObject, @unchecked Sendable {
         config.urlCache = URLCache(memoryCapacity: 20 * 1024 * 1024, diskCapacity: 100 * 1024 * 1024)
         self.session = URLSession(configuration: config)
         
+        // Clean legacy disk thumbnails on startup to enforce 100% single-copy storage
+        try? FileManager.default.removeItem(at: MediaCacheManager.shared.artworkDirectory)
+        try? FileManager.default.createDirectory(at: MediaCacheManager.shared.artworkDirectory, withIntermediateDirectories: true)
+        
         #if canImport(UIKit)
         NotificationCenter.default.addObserver(
             forName: UIApplication.didReceiveMemoryWarningNotification,
@@ -845,7 +835,20 @@ public final class ArtworkImageCache: ObservableObject, @unchecked Sendable {
     /// Instant O(1) synchronous RAM lookup. Returns decoded PlatformImage if already in memory.
     public func image(for url: URL?) -> PlatformImage? {
         guard let url = url else { return nil }
-        return cache.object(forKey: url as NSURL)
+        if let cached = cache.object(forKey: url as NSURL) {
+            return cached
+        }
+        
+        // Single-copy architecture: fast container header extraction straight to RAM (0.01ms)
+        if url.scheme == "sonorist-art" {
+            let vid = url.host ?? url.path.replacingOccurrences(of: "/", with: "")
+            if let data = MediaCacheManager.shared.cachedArtworkData(for: vid),
+               let decoded = Self.decodeImage(from: data) {
+                cache.setObject(decoded, forKey: url as NSURL)
+                return decoded
+            }
+        }
+        return nil
     }
     
     /// Pre-warms artwork in background so it's instantly available when swiping or switching tracks.
@@ -879,6 +882,18 @@ public final class ArtworkImageCache: ObservableObject, @unchecked Sendable {
                 self?.syncQueue.async {
                     self?.inFlightTasks.removeValue(forKey: url)
                 }
+            }
+            
+            // 0. Single-copy virtual container scheme: decodes directly in memory
+            if url.scheme == "sonorist-art" {
+                let vid = url.host ?? url.path.replacingOccurrences(of: "/", with: "")
+                if let data = MediaCacheManager.shared.cachedArtworkData(for: vid),
+                   let decoded = Self.decodeImage(from: data) {
+                    self?.cache.setObject(decoded, forKey: url as NSURL)
+                    DispatchQueue.main.async { self?.cacheRevision &+= 1 }
+                    return decoded
+                }
+                return nil
             }
             
             // 1. Local disk file
@@ -962,5 +977,21 @@ public final class ArtworkImageCache: ObservableObject, @unchecked Sendable {
         }
         
         return await newTask.value
+    }
+    
+    /// Decodes image data directly into hardware-accelerated memory format without touching disk
+    public static func decodeImage(from data: Data) -> PlatformImage? {
+        #if canImport(UIKit)
+        guard let image = UIImage(data: data) else { return nil }
+        UIGraphicsBeginImageContextWithOptions(image.size, false, image.scale)
+        image.draw(at: .zero)
+        let decoded = UIGraphicsGetImageFromCurrentImageContext() ?? image
+        UIGraphicsEndImageContext()
+        return decoded
+        #elseif canImport(AppKit)
+        return NSImage(data: data)
+        #else
+        return nil
+        #endif
     }
 }

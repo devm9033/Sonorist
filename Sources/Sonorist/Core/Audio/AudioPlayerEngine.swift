@@ -2892,8 +2892,29 @@ private final class BackgroundTaskBox: @unchecked Sendable {
             return artwork
         }
 
-        // 3. Check local disk cache (for offline / downloaded tracks)
-        if let localArtURL = MediaCacheManager.shared.cachedArtworkURL(for: track.id) {
+        // 3. Check single-copy container artwork in RAM (for offline / downloaded tracks)
+        if let artData = MediaCacheManager.shared.cachedArtworkData(for: track.id) {
+            #if os(iOS)
+            if let uiImg = UIImage(data: artData) {
+                let artwork = MPMediaItemArtwork(boundsSize: uiImg.size) { _ in uiImg }
+                if let urlKey = urlKey {
+                    Self.artworkCache.setObject(artwork, forKey: urlKey)
+                }
+                return artwork
+            }
+            #elseif os(macOS)
+            if let nsImg = NSImage(data: artData) {
+                let artwork = MPMediaItemArtwork(boundsSize: nsImg.size) { _ in nsImg }
+                if let urlKey = urlKey {
+                    Self.artworkCache.setObject(artwork, forKey: urlKey)
+                }
+                return artwork
+            }
+            #endif
+        }
+        
+        // 3b. Check legacy local disk cache if any file exists
+        if let localArtURL = MediaCacheManager.shared.cachedArtworkURL(for: track.id), localArtURL.isFileURL {
             #if os(iOS)
             if let uiImg = UIImage(contentsOfFile: localArtURL.path) {
                 let artwork = MPMediaItemArtwork(boundsSize: uiImg.size) { _ in uiImg }

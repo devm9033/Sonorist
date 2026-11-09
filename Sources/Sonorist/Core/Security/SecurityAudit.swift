@@ -37,7 +37,12 @@ public enum SecurityAudit {
             return url
         }
         
-        // 2. Enforce HTTPS (ATS requirement)
+        // 2. Allow internal single-copy virtual scheme for embedded artwork lookup
+        if url.scheme?.lowercased() == "sonorist-art" {
+            return url
+        }
+        
+        // 3. Enforce HTTPS (ATS requirement)
         guard url.scheme?.lowercased() == "https" else {
             return nil
         }
@@ -73,5 +78,28 @@ public enum SecurityAudit {
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
         let range = NSRange(location: 0, length: videoId.utf16.count)
         return regex.firstMatch(in: videoId, options: [], range: range) != nil
+    }
+    
+    /// Sanitizes track IDs and cache keys strictly against path traversal (../), slashes, null bytes,
+    /// and control characters to prevent arbitrary file writes during container or backup extraction.
+    public static func sanitizeTrackID(_ rawId: String) -> String {
+        let cleaned = rawId
+            .replacingOccurrences(of: "../", with: "")
+            .replacingOccurrences(of: "..\\", with: "")
+            .replacingOccurrences(of: "..", with: "")
+            .replacingOccurrences(of: "/", with: "")
+            .replacingOccurrences(of: "\\", with: "")
+            .replacingOccurrences(of: "\0", with: "")
+            .components(separatedBy: .controlCharacters)
+            .joined()
+            .filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
+        return String(cleaned.prefix(64))
+    }
+    
+    /// Validates that a resolved file URL strictly resides within the expected parent directory sandbox
+    public static func validateFilePath(_ fileURL: URL, within parentDirectory: URL) -> Bool {
+        let standardizedTarget = fileURL.standardizedFileURL.path
+        let standardizedParent = parentDirectory.standardizedFileURL.path
+        return standardizedTarget.hasPrefix(standardizedParent) && !standardizedTarget.contains("..")
     }
 }

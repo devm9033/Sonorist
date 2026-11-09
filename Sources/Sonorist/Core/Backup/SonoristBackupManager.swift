@@ -332,13 +332,17 @@ public enum SonoristBackupManager {
         let count: UInt32 = data.subdata(in: currentOffset..<(currentOffset + 4)).withUnsafeBytes { $0.load(as: UInt32.self) }.littleEndian
         currentOffset += 4
         
+        let totalCount = Int(count)
+        guard totalCount >= 0 && totalCount <= 5000 else {
+            throw NSError(domain: "SonoristBackupManager", code: 400, userInfo: [NSLocalizedDescriptionKey: "Malformed songs backup: song count exceeds security limit (5000)."])
+        }
+        
         let cache = MediaCacheManager.shared
         let existingTracks = cache.getAllCachedTracks()
         let existingMap = Dictionary(existingTracks.map { ($0.id, $0.title) }, uniquingKeysWith: { first, _ in first })
         
         var restoredCount = 0
         var alreadyPresentCount = 0
-        let totalCount = Int(count)
         
         for index in 0..<totalCount {
             guard currentOffset + 2 <= data.count else { break }
@@ -347,18 +351,33 @@ public enum SonoristBackupManager {
             
             guard currentOffset + Int(idLen) <= data.count else { break }
             let idData = data.subdata(in: currentOffset..<(currentOffset + Int(idLen)))
-            guard let trackId = String(data: idData, encoding: .utf8) else { break }
+            guard let rawTrackId = String(data: idData, encoding: .utf8) else { break }
             currentOffset += Int(idLen)
+            
+            // Hardened: Sanitize trackId against path traversal and control characters
+            let trackId = SecurityAudit.sanitizeTrackID(rawTrackId)
+            guard !trackId.isEmpty, trackId.count <= 64 else { continue }
             
             guard currentOffset + 8 <= data.count else { break }
             let dataLen: UInt64 = data.subdata(in: currentOffset..<(currentOffset + 8)).withUnsafeBytes { $0.load(as: UInt64.self) }.littleEndian
             currentOffset += 8
             
-            guard currentOffset + Int(dataLen) <= data.count else { break }
+            // Hardened: Reject 0-length or oversized allocation bombs (> 100 MB per track)
+            guard dataLen > 0 && dataLen <= 100 * 1024 * 1024 else { break }
+            guard UInt64(currentOffset) + dataLen <= UInt64(data.count) else { break }
+            
             let bundleData = data.subdata(in: currentOffset..<(currentOffset + Int(dataLen)))
             currentOffset += Int(dataLen)
             
-            let targetURL = cache.libraryDirectory.appendingPathComponent("\(trackId).sonorist")
+            let targetURL = cache.libraryDirectory.appendingPathComponent("\(trackId).sonorist").standardizedFileURL
+            guard SecurityAudit.validateFilePath(targetURL, within: cache.libraryDirectory) else { continue }
+            
+            // Hardened: Verify valid SONORIST container magic before saving to disk
+            guard bundleData.count >= 10,
+                  bundleData.starts(with: "SONORIST".data(using: .utf8)!) else {
+                continue
+            }
+            
             let isAlreadyCached = cache.isCached(videoId: trackId) || FileManager.default.fileExists(atPath: targetURL.path)
             
             let trackTitle: String
@@ -381,15 +400,6 @@ public enum SonoristBackupManager {
                 try? bundleData.write(to: targetURL, options: .atomic)
                 restoredCount += 1
                 progressHandler?(0.05 + progress * 0.90, "Restoring: \(trackTitle)", index + 1, totalCount)
-            }
-            
-            // Extract embedded album art directly to ArtworkCache for instant display
-            if let meta = try? SonoristBundleEngine.readMetadataOnly(from: bundleData),
-               let artData = meta.artworkData, !artData.isEmpty {
-                let artFileURL = cache.artworkDirectory.appendingPathComponent("\(trackId).jpg")
-                if !FileManager.default.fileExists(atPath: artFileURL.path) {
-                    try? artData.write(to: artFileURL, options: .atomic)
-                }
             }
             
             // Pacing sleep (20ms) so the restore loading bar visibly moves
@@ -490,8 +500,13 @@ public enum SonoristBackupManager {
         
         if let bundles = package.embeddedAudioBundles, !bundles.isEmpty {
             let totalBundles = bundles.count
-            for (index, (trackId, bundleData)) in bundles.enumerated() {
-                let targetURL = cache.libraryDirectory.appendingPathComponent("\(trackId).sonorist")
+            for (index, (rawTrackId, bundleData)) in bundles.enumerated() {
+                let trackId = SecurityAudit.sanitizeTrackID(rawTrackId)
+                guard !trackId.isEmpty, trackId.count <= 64 else { continue }
+                let targetURL = cache.libraryDirectory.appendingPathComponent("\(trackId).sonorist").standardizedFileURL
+                guard SecurityAudit.validateFilePath(targetURL, within: cache.libraryDirectory) else { continue }
+                guard bundleData.count >= 10, bundleData.starts(with: "SONORIST".data(using: .utf8)!) else { continue }
+                
                 let isAlreadyCached = cache.isCached(videoId: trackId) || FileManager.default.fileExists(atPath: targetURL.path)
                 let progress = Double(index + 1) / Double(totalBundles)
                 

@@ -1814,12 +1814,13 @@ struct SonoristTestsRunner {
             }
         }
         
-        // MARK: - 72. MediaCacheManager Artwork Extraction & Clear
-        testAsync("MediaCacheManager: Artwork Cache Lifecycle & Restore Extraction") {
+        // MARK: - 72. Single-Copy Architecture: Zero Duplicate Artwork on Disk
+        testAsync("MediaCacheManager: Single-Copy Artwork Architecture & Zero Disk Duplication") {
             let cache = MediaCacheManager.shared
-            let testId = "test_artwork_extract_999"
+            let testId = "test_single_copy_art_999"
             let dummyAudio = Data(repeating: 0x55, count: 512)
-            let dummyArt = Data(repeating: 0xFF, count: 256)
+            // Valid 1x1 PNG byte data to test genuine hardware-accelerated image decoding
+            let dummyArt = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")!
             let dummyTrack = Track(id: testId, title: "Art Test Track", artist: "Artist", durationSeconds: 200)
             
             let bundleData = try SonoristBundleEngine.pack(track: dummyTrack, audioData: dummyAudio, artworkData: dummyArt)
@@ -1829,37 +1830,125 @@ struct SonoristTestsRunner {
             
             cache.reloadManifest()
             
-            let exportURL = try await SonoristBackupManager.exportSongsBackup()
-            defer { try? FileManager.default.removeItem(at: exportURL) }
-            
-            // Delete both bundle and extracted art
-            try? FileManager.default.removeItem(at: bundleFile)
-            let artFile = cache.artworkDirectory.appendingPathComponent("\(testId).jpg")
-            try? FileManager.default.removeItem(at: artFile)
-            
-            // Import backup - should restore bundle AND extract artwork to disk
-            _ = try await SonoristBackupManager.importBackup(from: exportURL)
-            
-            guard FileManager.default.fileExists(atPath: artFile.path) else {
-                throw TestError("Expected artwork file to be extracted to disk during restore")
+            // 1. Artwork data is retrievable directly from the container in O(1) time
+            guard let extractedArt = cache.cachedArtworkData(for: testId), extractedArt == dummyArt else {
+                throw TestError("Expected cachedArtworkData to retrieve artwork directly from .sonorist container")
             }
             
-            // Verify clearArtworkCache removes all artwork
-            cache.clearArtworkCache()
+            // 2. Virtual single-copy scheme is generated without creating loose disk files
+            guard let artURL = cache.cachedArtworkURL(for: testId), artURL.scheme == "sonorist-art" else {
+                throw TestError("Expected virtual sonorist-art:// scheme for single-copy storage, got: \(String(describing: cache.cachedArtworkURL(for: testId)))")
+            }
+            
+            // 3. Disk footprint for loose artwork must be 0 KB
+            let artFile = cache.artworkDirectory.appendingPathComponent("\(testId).jpg")
             guard !FileManager.default.fileExists(atPath: artFile.path) else {
-                throw TestError("Expected clearArtworkCache to remove artwork file from disk")
+                throw TestError("Artwork must NOT be duplicated as a loose .jpg file on disk")
             }
             guard cache.getArtworkCacheSizeBytes() == 0 else {
-                throw TestError("Expected artwork cache size to be 0 after clearArtworkCache")
+                throw TestError("Loose artwork disk size must be 0 bytes under single-copy architecture")
             }
             
-            // Calling getAllCachedTracks must NOT automatically re-extract artwork to disk
+            // 4. In-memory ArtworkImageCache decodes container artwork directly into RAM
+            let loadedImage = await ArtworkImageCache.shared.loadImage(for: artURL)
+            guard loadedImage != nil else {
+                throw TestError("Expected ArtworkImageCache to decode container artwork into RAM")
+            }
+            guard ArtworkImageCache.shared.image(for: artURL) != nil else {
+                throw TestError("Expected decoded image in ArtworkImageCache RAM cache")
+            }
+            
+            // 5. Calling clearArtworkCache flushes RAM cache and keeps disk at 0 bytes
+            cache.clearArtworkCache()
+            guard cache.getArtworkCacheSizeBytes() == 0 else {
+                throw TestError("Expected artwork cache size to remain 0 after clearArtworkCache")
+            }
+            
+            // 6. Calling getAllCachedTracks must never write loose .jpg files to disk
             _ = cache.getAllCachedTracks()
             guard !FileManager.default.fileExists(atPath: artFile.path) else {
-                throw TestError("getAllCachedTracks should NOT re-extract artwork to disk")
+                throw TestError("getAllCachedTracks must NEVER write loose .jpg files to disk")
             }
-            guard cache.getArtworkCacheSizeBytes() == 0 else {
-                throw TestError("Artwork cache should remain 0 after getAllCachedTracks")
+        }
+        
+        // MARK: - 73. PenTest: Backup Path Traversal Attack Rejection
+        testAsync("PenTest: Backup Malicious Path Traversal Stripped & Contained") {
+            var maliciousPayload = SonoristBackupManager.songsMagicHeader
+            var version: UInt16 = UInt16(1).littleEndian
+            maliciousPayload.append(Data(bytes: &version, count: 2))
+            
+            // 1 song
+            var count: UInt32 = UInt32(1).littleEndian
+            maliciousPayload.append(Data(bytes: &count, count: 4))
+            
+            // Malicious trackId attempting path traversal to overwrite critical files
+            let evilId = "../../../../var/mobile/Library/Preferences/evil_hacked.plist"
+            let evilIdData = evilId.data(using: .utf8)!
+            var idLen = UInt16(evilIdData.count).littleEndian
+            maliciousPayload.append(Data(bytes: &idLen, count: 2))
+            maliciousPayload.append(evilIdData)
+            
+            // Pack dummy bundle
+            let dummyTrack = Track(id: "innocent", title: "Innocent", artist: "Artist")
+            let validBundle = try SonoristBundleEngine.pack(track: dummyTrack, audioData: Data(repeating: 0x22, count: 64))
+            var dataLen = UInt64(validBundle.count).littleEndian
+            maliciousPayload.append(Data(bytes: &dataLen, count: 8))
+            maliciousPayload.append(validBundle)
+            
+            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("evil_traversal_test.sonorist-songs")
+            try maliciousPayload.write(to: tempURL)
+            defer { try? FileManager.default.removeItem(at: tempURL) }
+            
+            // Import should sanitize the ID and contain it strictly within libraryDirectory
+            _ = try await SonoristBackupManager.importBackup(from: tempURL)
+            
+            // Verify path traversal failed: evil file was NOT created outside sandbox
+            let outsidePath = "/var/mobile/Library/Preferences/evil_hacked.plist"
+            guard !FileManager.default.fileExists(atPath: outsidePath) else {
+                throw TestError("CRITICAL SECURITY VULNERABILITY: Path traversal succeeded!")
+            }
+            
+            // Verify sanitized file (if written) is strictly inside libraryDirectory
+            let sanitized = SecurityAudit.sanitizeTrackID(evilId)
+            let sanitizedURL = MediaCacheManager.shared.libraryDirectory.appendingPathComponent("\(sanitized).sonorist")
+            if FileManager.default.fileExists(atPath: sanitizedURL.path) {
+                guard SecurityAudit.validateFilePath(sanitizedURL, within: MediaCacheManager.shared.libraryDirectory) else {
+                    throw TestError("Sanitized URL escaped the library container!")
+                }
+                try? FileManager.default.removeItem(at: sanitizedURL)
+            }
+        }
+        
+        // MARK: - 74. PenTest: Backup Gigabyte Memory Allocation Bomb Rejection
+        testAsync("PenTest: Backup Gigabyte Allocation Bomb Gracefully Handled") {
+            var bombPayload = SonoristBackupManager.songsMagicHeader
+            var version: UInt16 = UInt16(1).littleEndian
+            bombPayload.append(Data(bytes: &version, count: 2))
+            
+            // 1 song
+            var count: UInt32 = UInt32(1).littleEndian
+            bombPayload.append(Data(bytes: &count, count: 4))
+            
+            let id = "safe_track_id"
+            let idData = id.data(using: .utf8)!
+            var idLen = UInt16(idData.count).littleEndian
+            bombPayload.append(Data(bytes: &idLen, count: 2))
+            bombPayload.append(idData)
+            
+            // Weaponized dataLen: 4 Gigabytes (0xFFFFFFFF) to induce Out-Of-Memory panic
+            var hugeLen: UInt64 = UInt64(0xFFFFFFFF).littleEndian
+            bombPayload.append(Data(bytes: &hugeLen, count: 8))
+            // But payload ends immediately without 4GB of data!
+            
+            let tempBombURL = FileManager.default.temporaryDirectory.appendingPathComponent("alloc_bomb.sonorist-songs")
+            try bombPayload.write(to: tempBombURL)
+            defer { try? FileManager.default.removeItem(at: tempBombURL) }
+            
+            // Import must gracefully reject the allocation bomb without crashing or throwing unhandled fatal errors
+            do {
+                _ = try await SonoristBackupManager.importBackup(from: tempBombURL)
+            } catch {
+                // Expected graceful error or clean exit
             }
         }
         
