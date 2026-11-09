@@ -9,6 +9,8 @@ public final class MobileSearchModel: ObservableObject {
     @Published public var recommendedTracks: [Track] = []
     @Published public var isSearching: Bool = false
     @Published public var isLoadingRecommendations: Bool = false
+    @Published public var recommendationHeadline: String = "RECOMMENDED FOR YOU"
+    @Published public var lastSeedTrackId: String? = nil
     
     public var searchTask: Task<Void, Never>?
     public var recommendTask: Task<Void, Never>?
@@ -16,31 +18,60 @@ public final class MobileSearchModel: ObservableObject {
     public init() {}
     
     @MainActor
-    public func loadPersonalizedRecommendations(history: [Track], liked: [Track]) {
-        guard recommendedTracks.isEmpty && !isLoadingRecommendations else { return }
+    public func loadPersonalizedRecommendations(
+        history: [Track],
+        liked: [Track],
+        cached: [Track] = [],
+        force: Bool = false
+    ) {
+        let currentSeed = history.first ?? liked.first ?? cached.first
+        let currentSeedId = currentSeed?.id
+        
+        // If not forced and recommendations are already loaded for this exact seed, skip
+        if !force && !recommendedTracks.isEmpty && lastSeedTrackId == currentSeedId {
+            return
+        }
+        
+        guard !isLoadingRecommendations else { return }
         isLoadingRecommendations = true
+        self.lastSeedTrackId = currentSeedId
+        
+        if let seed = currentSeed {
+            let cleanTitle = seed.title.components(separatedBy: " (").first?.trimmingCharacters(in: .whitespaces) ?? seed.title
+            self.recommendationHeadline = "SIMILAR TO \"\(cleanTitle.prefix(22))\""
+        } else if cached.first != nil {
+            self.recommendationHeadline = "BASED ON YOUR DOWNLOADS"
+        } else {
+            self.recommendationHeadline = "RECOMMENDED FOR YOU"
+        }
         
         recommendTask?.cancel()
         recommendTask = Task {
-            var seeds: [String] = []
-            if let lastHistory = history.first {
-                seeds.append(lastHistory.id)
-            }
-            if let lastLiked = liked.first, !seeds.contains(lastLiked.id) {
-                seeds.append(lastLiked.id)
-            }
-            
             var fetched: [Track] = []
             
-            // 1. YouTube Music Quick Picks: algorithmic radio based on user's actual listening
-            for seedId in seeds {
-                if let radio = try? await InnerTubeClient.shared.fetchRadioTracks(for: seedId), !radio.isEmpty {
-                    fetched.append(contentsOf: radio)
-                    break
+            if let seed = currentSeed {
+                // 1. Primary: YouTube Music algorithmic radio for the seed track
+                if let radio = try? await InnerTubeClient.shared.fetchRadioTracks(for: seed.id), !radio.isEmpty {
+                    fetched = radio.filter { $0.id != seed.id }
+                }
+                
+                // 2. Secondary enrichment: If radio returned fewer than 6 tracks, search YouTube Music for related tracks by this artist
+                if fetched.count < 6 {
+                    let artistQuery = seed.artist.trimmingCharacters(in: .whitespaces)
+                    if !artistQuery.isEmpty && artistQuery.lowercased() != "youtube music" && artistQuery.lowercased() != "unknown artist" {
+                        if let artistResults = try? await InnerTubeClient.shared.search(query: "\(artistQuery) songs") {
+                            fetched.append(contentsOf: artistResults.filter { $0.id != seed.id })
+                        }
+                    }
+                }
+            } else if let cachedSeed = cached.first {
+                let artist = cachedSeed.artist
+                if let related = try? await InnerTubeClient.shared.search(query: "\(artist) songs") {
+                    fetched = related.filter { $0.id != cachedSeed.id }
                 }
             }
             
-            // 2. Fallback to real YouTube Music trending/popular query if no history exists yet
+            // 3. Fallback to real YouTube Music trending/popular query if no history or cache exists yet
             if fetched.isEmpty {
                 if let trending = try? await InnerTubeClient.shared.search(query: "Top Global Songs") {
                     fetched = trending
@@ -61,6 +92,18 @@ public final class MobileSearchModel: ObservableObject {
                 self.recommendedTracks = finalTracks
                 self.isLoadingRecommendations = false
             }
+        }
+    }
+    
+    @MainActor
+    public func refreshRecommendationsAsync(
+        history: [Track],
+        liked: [Track],
+        cached: [Track] = []
+    ) async {
+        loadPersonalizedRecommendations(history: history, liked: liked, cached: cached, force: true)
+        while isLoadingRecommendations {
+            try? await Task.sleep(nanoseconds: 100_000_000)
         }
     }
 }
@@ -116,10 +159,35 @@ public struct MobileSearchView: View {
                 .padding(.bottom, 180) // Generous space so last track scrolls fully clear of MiniPlayer & TabBar
             }
             .scrollDismissesKeyboard(.immediately)
+            .refreshable {
+                MobileHaptics.trigger(.medium)
+                if model.selectedMood == "All" && model.searchQuery.isEmpty {
+                    await model.refreshRecommendationsAsync(
+                        history: player.playHistory,
+                        liked: player.likedTracks,
+                        cached: MediaCacheManager.shared.getAllCachedTracks()
+                    )
+                }
+            }
         }
         .onAppear {
-            if model.recommendedTracks.isEmpty {
-                model.loadPersonalizedRecommendations(history: player.playHistory, liked: player.likedTracks)
+            let currentSeedId = (player.playHistory.first ?? player.likedTracks.first ?? MediaCacheManager.shared.getAllCachedTracks().first)?.id
+            if model.recommendedTracks.isEmpty || (currentSeedId != nil && currentSeedId != model.lastSeedTrackId) {
+                model.loadPersonalizedRecommendations(
+                    history: player.playHistory,
+                    liked: player.likedTracks,
+                    cached: MediaCacheManager.shared.getAllCachedTracks()
+                )
+            }
+        }
+        .onChange(of: player.playHistory.first?.id) { _, newSeedId in
+            if model.selectedMood == "All" && model.searchQuery.isEmpty && newSeedId != model.lastSeedTrackId {
+                model.loadPersonalizedRecommendations(
+                    history: player.playHistory,
+                    liked: player.likedTracks,
+                    cached: MediaCacheManager.shared.getAllCachedTracks(),
+                    force: true
+                )
             }
         }
     }
@@ -253,14 +321,31 @@ public struct MobileSearchView: View {
             // 2. Quick Picks (Personalized algorithmic recommendations)
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text(player.playHistory.first != nil ? "QUICK PICKS • SIMILAR TO RECENT" : "RECOMMENDED FOR YOU")
+                    Text(model.recommendationHeadline.uppercased())
                         .font(.system(size: 11, weight: .bold))
                         .foregroundColor(.secondary)
                         .tracking(0.8)
+                        .lineLimit(1)
+                    
                     Spacer()
+                    
                     if model.isLoadingRecommendations {
                         ProgressView()
-                            .scaleEffect(0.8)
+                            .scaleEffect(0.7)
+                    } else {
+                        Button {
+                            MobileHaptics.trigger(.light)
+                            model.loadPersonalizedRecommendations(
+                                history: player.playHistory,
+                                liked: player.likedTracks,
+                                cached: MediaCacheManager.shared.getAllCachedTracks(),
+                                force: true
+                            )
+                        } label: {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(.secondary)
+                        }
                     }
                 }
                 .padding(.horizontal, 16)
@@ -382,8 +467,13 @@ public struct MobileSearchView: View {
             model.searchTask?.cancel()
             model.isSearching = false
             model.searchResults = []
-            if model.recommendedTracks.isEmpty {
-                model.loadPersonalizedRecommendations(history: player.playHistory, liked: player.likedTracks)
+            let currentSeedId = (player.playHistory.first ?? player.likedTracks.first ?? MediaCacheManager.shared.getAllCachedTracks().first)?.id
+            if model.recommendedTracks.isEmpty || (currentSeedId != nil && currentSeedId != model.lastSeedTrackId) {
+                model.loadPersonalizedRecommendations(
+                    history: player.playHistory,
+                    liked: player.likedTracks,
+                    cached: MediaCacheManager.shared.getAllCachedTracks()
+                )
             }
         } else {
             // Dynamically query YouTube Music for real playable tracks in this genre

@@ -91,7 +91,7 @@ public struct SettingsView: View {
             Button("Clear History", role: .destructive) {
                 FluidHaptics.toggle()
                 withAnimation(FluidTheme.tapSpring) {
-                    player.playHistory.removeAll()
+                    player.clearPlayHistory()
                     ListeningAnalyticsManager.shared.resetAll()
                 }
             }

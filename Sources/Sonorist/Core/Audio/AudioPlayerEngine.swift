@@ -357,6 +357,7 @@ public final class AudioPlayerEngine: ObservableObject {
         }
 
         loadLikedTracks()
+        loadPlayHistory()
         restoreSavedPlaybackState()
 
         if UserDefaults.standard.object(forKey: Self.savedCrossfadeEnabledKey) != nil {
@@ -611,10 +612,13 @@ public final class AudioPlayerEngine: ObservableObject {
         self.currentStreamRemoteURL = nil
         self.autoSaveTask?.cancel()
 
-        // Add to history
-        if !playHistory.contains(where: { $0.id == track.id }) {
-            playHistory.insert(track, at: 0)
+        // Add to history (promote to front if replayed, persist up to 50 items)
+        playHistory.removeAll(where: { $0.id == track.id })
+        playHistory.insert(track, at: 0)
+        if playHistory.count > 50 {
+            playHistory.removeLast()
         }
+        savePlayHistory()
 
         // Ensure queue contains track for next/prev remote controls
         if !queue.contains(where: { $0.id == track.id }) {
@@ -896,10 +900,13 @@ public final class AudioPlayerEngine: ObservableObject {
         self.errorMessage = nil
         self.isBuffering = false
 
-        // Add to history
-        if !playHistory.contains(where: { $0.id == track.id }) {
-            playHistory.insert(track, at: 0)
+        // Add to history (promote to front if replayed, persist up to 50 items)
+        playHistory.removeAll(where: { $0.id == track.id })
+        playHistory.insert(track, at: 0)
+        if playHistory.count > 50 {
+            playHistory.removeLast()
         }
+        savePlayHistory()
         if !queue.contains(where: { $0.id == track.id }) {
             queue.insert(track, at: 0)
         }
@@ -2231,6 +2238,25 @@ public final class AudioPlayerEngine: ObservableObject {
         if let data = UserDefaults.standard.data(forKey: "SonoristLikedTracks") ?? UserDefaults.standard.data(forKey: "MetrolistLikedTracks"),
            let tracks = try? JSONDecoder().decode([Track].self, from: data) {
             self.likedTracks = tracks
+        }
+    }
+
+    public func clearPlayHistory() {
+        playHistory.removeAll()
+        savePlayHistory()
+    }
+
+    public func savePlayHistory() {
+        let historyToSave = Array(playHistory.prefix(50))
+        if let data = try? JSONEncoder().encode(historyToSave) {
+            UserDefaults.standard.set(data, forKey: "SonoristPlayHistory")
+        }
+    }
+
+    private func loadPlayHistory() {
+        if let data = UserDefaults.standard.data(forKey: "SonoristPlayHistory") ?? UserDefaults.standard.data(forKey: "MetrolistPlayHistory"),
+           let tracks = try? JSONDecoder().decode([Track].self, from: data) {
+            self.playHistory = tracks
         }
     }
 

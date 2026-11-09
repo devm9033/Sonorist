@@ -1455,6 +1455,53 @@ struct SonoristTestsRunner {
             }
         }
         
+        // MARK: - 25. Recommendation Engine & Play History Persistence
+        test("AudioPlayerEngine: Play History Re-ordering & UserDefaults Persistence") {
+            let engine = AudioPlayerEngine.shared
+            engine.clearPlayHistory()
+            guard engine.playHistory.isEmpty else { throw TestError("History should be empty after clear") }
+            
+            let track1 = Track(id: "t1", title: "Song 1", artist: "Artist 1")
+            let track2 = Track(id: "t2", title: "Song 2", artist: "Artist 2")
+            let track3 = Track(id: "t3", title: "Song 3", artist: "Artist 3")
+            
+            // Simulate playing tracks
+            engine.playHistory.insert(track1, at: 0)
+            engine.playHistory.insert(track2, at: 0)
+            engine.savePlayHistory()
+            guard engine.playHistory.first?.id == "t2" else { throw TestError("Expected track 2 at top of history") }
+            
+            // Replay track 1 - should move to front!
+            engine.playHistory.removeAll(where: { $0.id == track1.id })
+            engine.playHistory.insert(track1, at: 0)
+            engine.savePlayHistory()
+            guard engine.playHistory.first?.id == "t1" else { throw TestError("Replayed track 1 must move to index 0") }
+            guard engine.playHistory.count == 2 else { throw TestError("Expected 2 items in history") }
+            
+            // Verify UserDefaults persistence
+            guard let data = UserDefaults.standard.data(forKey: "SonoristPlayHistory"),
+                  let loaded = try? JSONDecoder().decode([Track].self, from: data) else {
+                throw TestError("SonoristPlayHistory was not persisted to UserDefaults")
+            }
+            guard loaded.first?.id == "t1" else { throw TestError("Persisted history does not match") }
+        }
+        
+        test("Search Recommendations: Dynamic Seed Headline & Non-Blocking Updates") {
+            let model = MobileSearchModel.shared
+            let t = Track(id: "bengali_rec_seed", title: "Ami Banglay Gaan Gai", artist: "Pratul Mukhopadhyay")
+            
+            // Load recommendations with seed
+            model.loadPersonalizedRecommendations(history: [t], liked: [], cached: [], force: true)
+            
+            // Verify seed tracking and headline format
+            guard model.lastSeedTrackId == "bengali_rec_seed" else {
+                throw TestError("lastSeedTrackId should be bengali_rec_seed")
+            }
+            guard model.recommendationHeadline.contains("SIMILAR TO") && model.recommendationHeadline.contains("Ami Banglay Gaan Gai") else {
+                throw TestError("Headline should dynamically name the seed track: got \(model.recommendationHeadline)")
+            }
+        }
+        
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         print("  Results: \(passed) passed, \(failed) failed")
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")

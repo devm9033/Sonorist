@@ -848,6 +848,18 @@ public actor InnerTubeClient {
     }
     
     nonisolated private func fallbackTracks(for query: String) -> [Track] {
+        let cached = MediaCacheManager.shared.getAllCachedTracks()
+        let matchingCached = cached.filter {
+            $0.title.localizedCaseInsensitiveContains(query) ||
+            $0.artist.localizedCaseInsensitiveContains(query)
+        }
+        if !matchingCached.isEmpty {
+            return matchingCached
+        }
+        if !cached.isEmpty && (query.lowercased().contains("song") || query.lowercased().contains("top") || query.lowercased().contains("music")) {
+            return cached
+        }
+        
         let all = fetchFeaturedTracks()
         let filtered = all.filter {
             $0.title.localizedCaseInsensitiveContains(query) ||
