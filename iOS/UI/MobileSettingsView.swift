@@ -7,6 +7,7 @@ import UIKit
 public final class MobileSettingsModel: ObservableObject {
     public static let shared = MobileSettingsModel()
     @Published public var showClearCacheAlert: Bool = false
+    @Published public var showResetListeningAlert: Bool = false
     @Published public var cacheSizeText: String = "Calculating..."
     @Published public var cacheSizeBytes: Int64 = 0
     @Published public var storageLimitGB: Double = 5.0
@@ -411,6 +412,19 @@ public struct MobileSettingsView: View {
                                 .font(.system(size: 15, weight: .medium))
                         }
                     }
+                    
+                    // 4. Reset Listening History Button
+                    Button(role: .destructive) {
+                        MobileHaptics.trigger(.medium)
+                        model.showResetListeningAlert = true
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "clock.arrow.circlepath")
+                                .font(.system(size: 14, weight: .medium))
+                            Text("Reset Listening History")
+                                .font(.system(size: 15, weight: .medium))
+                        }
+                    }
                 } header: {
                     Text("STORAGE & DOWNLOADS")
                         .font(.system(size: 12, weight: .bold))
@@ -543,6 +557,16 @@ public struct MobileSettingsView: View {
                 }
             } message: {
                 Text("This will remove all downloaded offline songs and temporary stream buffers.")
+            }
+            .alert("Reset Listening History?", isPresented: $model.showResetListeningAlert) {
+                Button("Cancel", role: .cancel) {}
+                Button("Reset All", role: .destructive) {
+                    ListeningAnalyticsManager.shared.resetAll()
+                    AIInsightsEngine.shared.currentStory = nil
+                    MobileToastManager.shared.show(message: "Listening history reset to 0 mins", icon: "arrow.counterclockwise")
+                }
+            } message: {
+                Text("Permanently resets all listening streaks, play counts, and insights logs.")
             }
             .onAppear {
                 calculateCacheSize()

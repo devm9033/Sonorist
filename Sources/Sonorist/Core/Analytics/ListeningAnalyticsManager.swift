@@ -350,6 +350,7 @@ public final class ListeningAnalyticsManager: ObservableObject {
     // MARK: - Formatting Helpers
     
     public var formattedTotalTime: String {
+        guard totalSongsPlayed > 0 else { return "0 mins" }
         let totalMins = Int(totalSecondsListened) / 60
         if totalMins < 60 {
             return "\(max(0, totalMins)) mins"
@@ -430,8 +431,14 @@ public final class ListeningAnalyticsManager: ObservableObject {
     }
     
     private func loadPersistedStats() {
-        self.totalSecondsListened = userDefaults.double(forKey: kTotalSeconds)
         self.totalSongsPlayed = userDefaults.integer(forKey: kTotalSongs)
+        let rawSeconds = userDefaults.double(forKey: kTotalSeconds)
+        if self.totalSongsPlayed == 0 {
+            self.totalSecondsListened = 0.0
+            userDefaults.removeObject(forKey: kTotalSeconds)
+        } else {
+            self.totalSecondsListened = rawSeconds
+        }
         self.currentStreakDays = userDefaults.integer(forKey: kStreakDays)
         
         let lastTimestamp = userDefaults.double(forKey: kLastListeningDate)

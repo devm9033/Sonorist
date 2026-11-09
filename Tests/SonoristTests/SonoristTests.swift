@@ -1659,6 +1659,7 @@ struct SonoristTestsRunner {
         // MARK: - 67. ListeningAnalyticsManager 1MB Log Safety
         test("ListeningAnalyticsManager: 1MB Log Memory Boundary & Prune Safety") {
             let manager = ListeningAnalyticsManager.shared
+            defer { manager.resetAll() }
             let sampleTrack = Track(id: "overflow_test", title: "Heavy Log Track", artist: "Artist", durationSeconds: 200)
             
             // Simulate adding many events
@@ -1720,6 +1721,15 @@ struct SonoristTestsRunner {
         // MARK: - 69. ListeningAnalyticsManager Zero Fake Metrics
         test("ListeningAnalyticsManager: Zero Fake Metrics When Empty & Analyzing Fallback") {
             let manager = ListeningAnalyticsManager.shared
+            manager.resetAll()
+            defer { manager.resetAll() }
+            
+            guard manager.totalSongsPlayed == 0 else {
+                throw TestError("Expected totalSongsPlayed to be 0 after reset")
+            }
+            guard manager.formattedTotalTime == "0 mins" else {
+                throw TestError("Expected formattedTotalTime == '0 mins' when empty, got \(manager.formattedTotalTime)")
+            }
             
             if manager.listeningJournal.isEmpty {
                 guard manager.completionPercentage == 0.0 else {
@@ -1737,6 +1747,9 @@ struct SonoristTestsRunner {
                 }
             }
         }
+        
+        // Final cleanup: Never leave test telemetry in user preferences
+        ListeningAnalyticsManager.shared.resetAll()
         
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         print("  Results: \(passed) passed, \(failed) failed")
