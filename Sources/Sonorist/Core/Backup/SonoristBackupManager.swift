@@ -103,7 +103,8 @@ public enum SonoristBackupManager {
     
     /// Exports Playlists, Custom Folders, Favorites, Preferences, AI Config, and Telemetry (No Audio Bloat).
     @MainActor
-    public static func exportSettingsBackup() async throws -> URL {
+    public static func exportSettingsBackup(progressHandler: ((Double, String) -> Void)? = nil) async throws -> URL {
+        progressHandler?(0.15, "Gathering playlists & preferences...")
         let player = AudioPlayerEngine.shared
         let aiConfig = AIProviderConfig.shared
         let themeManager = AppThemeManager.shared
@@ -112,6 +113,7 @@ public enum SonoristBackupManager {
         let cache = MediaCacheManager.shared
         
         let offlineTracks = cache.getAllCachedTracks()
+        progressHandler?(0.45, "Encoding configuration & playlists...")
         
         let package = SonoristBackupPackage(
             version: 1,
@@ -142,6 +144,7 @@ public enum SonoristBackupManager {
         )
         
         let jsonData = try JSONEncoder().encode(package)
+        progressHandler?(0.75, "Packaging backup file...")
         
         // Pack with magic header
         var payload = Data()
@@ -157,15 +160,19 @@ public enum SonoristBackupManager {
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
         
         try payload.write(to: tempURL, options: .atomic)
+        progressHandler?(1.0, "Ready!")
         return tempURL
     }
     
     /// Exports ONLY downloaded offline songs directly in high-efficiency binary container (Zero Base64 overhead).
     @MainActor
-    public static func exportSongsBackup() async throws -> URL {
+    public static func exportSongsBackup(progressHandler: ((Double, String) -> Void)? = nil) async throws -> URL {
         let cache = MediaCacheManager.shared
         let files = (try? FileManager.default.contentsOfDirectory(atPath: cache.libraryDirectory.path)) ?? []
         let sonoristFiles = files.filter { $0.hasSuffix(".sonorist") }
+        let totalCount = sonoristFiles.count
+        
+        progressHandler?(0.05, "Scanning \(totalCount) offline songs...")
         
         var payload = Data()
         // 1. Magic Header (14 bytes)
@@ -176,14 +183,17 @@ public enum SonoristBackupManager {
         payload.append(Data(bytes: &version, count: MemoryLayout<UInt16>.size))
         
         // 3. Track Count (UInt32, 4 bytes)
-        var count: UInt32 = UInt32(sonoristFiles.count).littleEndian
+        var count: UInt32 = UInt32(totalCount).littleEndian
         payload.append(Data(bytes: &count, count: MemoryLayout<UInt32>.size))
         
         // 4. Sequential Song Bundles (Direct raw binary chunks)
-        for filename in sonoristFiles {
+        for (index, filename) in sonoristFiles.enumerated() {
             let trackId = String(filename.dropLast(".sonorist".count))
             let fileURL = cache.libraryDirectory.appendingPathComponent(filename)
             guard let fileData = try? Data(contentsOf: fileURL) else { continue }
+            
+            let progress = Double(index + 1) / Double(max(1, totalCount))
+            progressHandler?(0.05 + progress * 0.90, "Packaging song \(index + 1) of \(totalCount)...")
             
             // Video ID (Length-prefixed UTF-8)
             let idBytes = Array(trackId.utf8)
@@ -197,6 +207,7 @@ public enum SonoristBackupManager {
             payload.append(fileData)
         }
         
+        progressHandler?(0.96, "Writing backup container...")
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd_HHmm"
         let dateStr = dateFormatter.string(from: Date())
@@ -204,6 +215,7 @@ public enum SonoristBackupManager {
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
         
         try payload.write(to: tempURL, options: .atomic)
+        progressHandler?(1.0, "Packaging complete!")
         return tempURL
     }
     
@@ -221,7 +233,7 @@ public enum SonoristBackupManager {
     
     /// Restores state or songs from a given backup file URL.
     @MainActor
-    public static func importBackup(from url: URL) async throws -> BackupRestoreSummary {
+    public static func importBackup(from url: URL, progressHandler: ((Double, String) -> Void)? = nil) async throws -> BackupRestoreSummary {
         let isSecurityScoped = url.startAccessingSecurityScopedResource()
         defer {
             if isSecurityScoped {
@@ -229,11 +241,12 @@ public enum SonoristBackupManager {
             }
         }
         
+        progressHandler?(0.05, "Reading backup file...")
         let data = try Data(contentsOf: url)
         
         // 1. Detect Songs Only format
         if data.starts(with: songsMagicHeader) {
-            return try restoreSongs(from: data)
+            return try restoreSongs(from: data, progressHandler: progressHandler)
         }
         
         // 2. Detect Settings format
@@ -242,14 +255,15 @@ public enum SonoristBackupManager {
             guard data.count > offset else {
                 throw NSError(domain: "SonoristBackupManager", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid backup file size."])
             }
+            progressHandler?(0.25, "Validating settings package...")
             let jsonPayload = data.subdata(in: offset..<data.count)
             let package = try JSONDecoder().decode(SonoristBackupPackage.self, from: jsonPayload)
-            return try applyPackage(package)
+            return try applyPackage(package, progressHandler: progressHandler)
         }
         
         // 3. Fallback: Raw JSON package
         if let rawPackage = try? JSONDecoder().decode(SonoristBackupPackage.self, from: data) {
-            return try applyPackage(rawPackage)
+            return try applyPackage(rawPackage, progressHandler: progressHandler)
         }
         
         throw NSError(domain: "SonoristBackupManager", code: 401, userInfo: [NSLocalizedDescriptionKey: "Invalid backup format or unrecognized file header."])
@@ -258,7 +272,7 @@ public enum SonoristBackupManager {
     // MARK: - Private Restore Helpers
     
     @MainActor
-    private static func restoreSongs(from data: Data) throws -> BackupRestoreSummary {
+    private static func restoreSongs(from data: Data, progressHandler: ((Double, String) -> Void)? = nil) throws -> BackupRestoreSummary {
         let offset = songsMagicHeader.count + 2 // header + version
         guard data.count >= offset + 4 else {
             throw NSError(domain: "SonoristBackupManager", code: 400, userInfo: [NSLocalizedDescriptionKey: "Corrupted songs backup file."])
@@ -292,9 +306,14 @@ public enum SonoristBackupManager {
             let targetURL = cache.libraryDirectory.appendingPathComponent("\(trackId).sonorist")
             try? bundleData.write(to: targetURL, options: .atomic)
             restoredCount += 1
+            
+            let progress = Double(restoredCount) / Double(max(1, Int(count)))
+            progressHandler?(0.08 + progress * 0.88, "Restoring song \(restoredCount) of \(count)...")
         }
         
+        progressHandler?(0.98, "Updating offline library manifest...")
         cache.reloadManifest()
+        progressHandler?(1.0, "Restored \(restoredCount) songs!")
         return BackupRestoreSummary(
             playlistCount: 0,
             favoriteCount: 0,
@@ -306,7 +325,7 @@ public enum SonoristBackupManager {
     }
     
     @MainActor
-    private static func applyPackage(_ package: SonoristBackupPackage) throws -> BackupRestoreSummary {
+    private static func applyPackage(_ package: SonoristBackupPackage, progressHandler: ((Double, String) -> Void)? = nil) throws -> BackupRestoreSummary {
         let player = AudioPlayerEngine.shared
         let aiConfig = AIProviderConfig.shared
         let themeManager = AppThemeManager.shared
@@ -314,6 +333,7 @@ public enum SonoristBackupManager {
         let playlistEngine = AIPlaylistEngine.shared
         let cache = MediaCacheManager.shared
         
+        progressHandler?(0.35, "Restoring theme & playback preferences...")
         // 1. Restore Theme
         if let mode = AppThemeMode(rawValue: package.theme) {
             themeManager.setTheme(mode)
@@ -335,6 +355,7 @@ public enum SonoristBackupManager {
         aiConfig.selectedModelId = package.aiSelectedModelId
         aiConfig.isAutoCurateOnDownloadEnabled = package.aiAutoCurateOnDownload
         
+        progressHandler?(0.65, "Restoring playlists & favorites...")
         // 4. Restore Playlists & Liked Tracks
         playlistEngine.curatedLibrary = package.curatedLibrary
         playlistEngine.saveLibrary()
@@ -366,10 +387,13 @@ public enum SonoristBackupManager {
         var needsDownload: [Track] = []
         
         if let bundles = package.embeddedAudioBundles, !bundles.isEmpty {
-            for (trackId, bundleData) in bundles {
+            let totalBundles = bundles.count
+            for (index, (trackId, bundleData)) in bundles.enumerated() {
                 let targetURL = cache.libraryDirectory.appendingPathComponent("\(trackId).sonorist")
                 try? bundleData.write(to: targetURL, options: .atomic)
                 audioRestored += 1
+                let progress = Double(index + 1) / Double(totalBundles)
+                progressHandler?(0.7 + progress * 0.28, "Restoring legacy audio \(index + 1) of \(totalBundles)...")
             }
             cache.reloadManifest()
         } else {
@@ -380,6 +404,7 @@ public enum SonoristBackupManager {
             }
         }
         
+        progressHandler?(1.0, "Restore completed!")
         return BackupRestoreSummary(
             playlistCount: package.curatedLibrary.totalTrackCount,
             favoriteCount: package.likedTracks.count,

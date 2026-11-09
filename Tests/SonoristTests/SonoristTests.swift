@@ -1783,6 +1783,28 @@ struct SonoristTestsRunner {
             }
         }
         
+        // MARK: - 71. SonoristBackupManager Progress Reporting
+        testAsync("SonoristBackupManager: Progress Handler Delivers Live Milestones") {
+            var progressValues: [Double] = []
+            var statusMessages: [String] = []
+            
+            let exportURL = try await SonoristBackupManager.exportSettingsBackup { progress, message in
+                progressValues.append(progress)
+                statusMessages.append(message)
+            }
+            defer { try? FileManager.default.removeItem(at: exportURL) }
+            
+            guard !progressValues.isEmpty else {
+                throw TestError("Expected progress milestones to be emitted")
+            }
+            guard let last = progressValues.last, last >= 1.0 else {
+                throw TestError("Expected final progress to reach 1.0, got \(progressValues.last ?? 0)")
+            }
+            guard !statusMessages.isEmpty else {
+                throw TestError("Expected status messages to be emitted")
+            }
+        }
+        
         // Final cleanup: Never leave test telemetry in user preferences
         ListeningAnalyticsManager.shared.resetAll()
         

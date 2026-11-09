@@ -23,6 +23,16 @@ public final class MobileSettingsModel: ObservableObject {
     @Published public var settingsBackupSizeText: String = "~64 KB"
     @Published public var songsBackupSizeText: String = "0 MB"
     
+    // Backup & Restore Progress & Completion HUD
+    @Published public var showBackupStatusSheet: Bool = false
+    @Published public var backupOperationType: String = ""
+    @Published public var backupIsCompleted: Bool = false
+    @Published public var backupProgress: Double = 0.0
+    @Published public var backupStatusMessage: String = ""
+    @Published public var backupResultTitle: String = ""
+    @Published public var backupResultMessage: String = ""
+    @Published public var backupFailedError: String? = nil
+    
     public init() {
         self.storageLimitGB = MediaCacheManager.shared.maxStorageLimitGB
         updateBackupEstimates()
@@ -34,40 +44,72 @@ public final class MobileSettingsModel: ObservableObject {
     }
     
     public func exportSettingsBackup() {
-        isExportingBackup = true
+        showBackupStatusSheet = true
+        backupOperationType = "Exporting Playlists & Settings"
+        backupIsCompleted = false
+        backupFailedError = nil
+        backupProgress = 0.1
+        backupStatusMessage = "Starting backup..."
+        
         Task {
             do {
-                let url = try await SonoristBackupManager.exportSettingsBackup()
+                let url = try await SonoristBackupManager.exportSettingsBackup { progress, message in
+                    Task { @MainActor in
+                        self.backupProgress = progress
+                        self.backupStatusMessage = message
+                    }
+                }
                 await MainActor.run {
-                    self.isExportingBackup = false
+                    self.backupProgress = 1.0
+                    self.backupStatusMessage = "Completed"
+                    self.backupIsCompleted = true
+                    self.backupResultTitle = "Backup Completed!"
+                    self.backupResultMessage = "Playlists, custom subfolders, favorites, and settings exported successfully."
                     self.exportedBackupURL = url
-                    self.showShareSheet = true
-                    MobileHaptics.trigger(.medium)
+                    MobileHaptics.trigger(.heavy)
                 }
             } catch {
                 await MainActor.run {
-                    self.isExportingBackup = false
-                    MobileToastManager.shared.show(message: "Export Failed: \(error.localizedDescription)", icon: "xmark.circle")
+                    self.backupIsCompleted = false
+                    self.backupFailedError = error.localizedDescription
+                    MobileHaptics.trigger(.error)
                 }
             }
         }
     }
     
     public func exportSongsBackup() {
-        isExportingBackup = true
+        showBackupStatusSheet = true
+        backupOperationType = "Exporting Songs Backup"
+        backupIsCompleted = false
+        backupFailedError = nil
+        backupProgress = 0.05
+        backupStatusMessage = "Scanning offline library..."
+        
         Task {
             do {
-                let url = try await SonoristBackupManager.exportSongsBackup()
+                let url = try await SonoristBackupManager.exportSongsBackup { progress, message in
+                    Task { @MainActor in
+                        self.backupProgress = progress
+                        self.backupStatusMessage = message
+                    }
+                }
+                let count = MediaCacheManager.shared.getAllCachedTracks().count
+                let size = SonoristBackupManager.calculateSongsBackupSize().formatted
                 await MainActor.run {
-                    self.isExportingBackup = false
+                    self.backupProgress = 1.0
+                    self.backupStatusMessage = "Completed"
+                    self.backupIsCompleted = true
+                    self.backupResultTitle = "Songs Backup Completed!"
+                    self.backupResultMessage = "\(count) \(count == 1 ? "song" : "songs") packaged into a single \(size) offline file."
                     self.exportedBackupURL = url
-                    self.showShareSheet = true
-                    MobileHaptics.trigger(.medium)
+                    MobileHaptics.trigger(.heavy)
                 }
             } catch {
                 await MainActor.run {
-                    self.isExportingBackup = false
-                    MobileToastManager.shared.show(message: "Export Failed: \(error.localizedDescription)", icon: "xmark.circle")
+                    self.backupIsCompleted = false
+                    self.backupFailedError = error.localizedDescription
+                    MobileHaptics.trigger(.error)
                 }
             }
         }
@@ -82,35 +124,43 @@ public final class MobileSettingsModel: ObservableObject {
     }
     
     public func importBackup(from url: URL) {
-        isImportingBackup = true
+        showBackupStatusSheet = true
+        backupOperationType = "Restoring Backup"
+        backupIsCompleted = false
+        backupFailedError = nil
+        backupProgress = 0.05
+        backupStatusMessage = "Opening backup package..."
+        
         Task {
             do {
-                let summary = try await SonoristBackupManager.importBackup(from: url)
+                let summary = try await SonoristBackupManager.importBackup(from: url) { progress, message in
+                    Task { @MainActor in
+                        self.backupProgress = progress
+                        self.backupStatusMessage = message
+                    }
+                }
                 await MainActor.run {
-                    self.isImportingBackup = false
-                    MobileHaptics.trigger(.heavy)
+                    self.backupProgress = 1.0
+                    self.backupStatusMessage = "Completed"
+                    self.backupIsCompleted = true
+                    self.backupResultTitle = "Restore Completed!"
                     if summary.audioRestoredCount > 0 && summary.playlistCount == 0 {
-                        MobileToastManager.shared.show(
-                            message: "Restored \(summary.audioRestoredCount) offline songs!",
-                            icon: "checkmark.circle.fill"
-                        )
+                        self.backupResultMessage = "Successfully restored \(summary.audioRestoredCount) \(summary.audioRestoredCount == 1 ? "song" : "songs") to your offline library."
+                    } else if summary.audioRestoredCount > 0 {
+                        self.backupResultMessage = "Successfully restored \(summary.audioRestoredCount) offline songs and \(summary.playlistCount) playlists."
                     } else {
-                        MobileToastManager.shared.show(
-                            message: "Restored \(summary.playlistCount) playlists & settings!",
-                            icon: "checkmark.circle.fill"
-                        )
+                        self.backupResultMessage = "Successfully restored \(summary.playlistCount) playlists, favorites, and preferences."
                     }
                     MobileLibraryModel.shared.loadOfflineTracks()
                     AIPlaylistEngine.shared.reconcileWithCachedTracks()
                     self.updateBackupEstimates()
+                    MobileHaptics.trigger(.heavy)
                 }
             } catch {
                 await MainActor.run {
-                    self.isImportingBackup = false
-                    MobileToastManager.shared.show(
-                        message: "Restore Failed: \(error.localizedDescription)",
-                        icon: "xmark.circle"
-                    )
+                    self.backupIsCompleted = false
+                    self.backupFailedError = error.localizedDescription
+                    MobileHaptics.trigger(.error)
                 }
             }
         }
@@ -132,8 +182,37 @@ public struct MobileSettingsView: View {
     
     public var body: some View {
         NavigationStack {
-            List {
-                // MARK: - Appearance & Theme Section
+            VStack(spacing: 0) {
+                // Compact Native Sheet Header (Aligns Settings and Done on the same horizontal row with zero dead gap)
+                HStack(alignment: .center) {
+                    Text("Settings")
+                        .font(.system(size: 26, weight: .bold, design: .rounded))
+                        .foregroundColor(.primary)
+                    
+                    Spacer()
+                    
+                    if isPresentedAsSheet {
+                        Button {
+                            MobileHaptics.trigger(.light)
+                            dismiss()
+                        } label: {
+                            Text("Done")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundColor(FluidTheme.musicRed)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 7)
+                                .background(FluidTheme.musicRed.opacity(0.12))
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 10)
+                .padding(.bottom, 4)
+                
+                List {
+                    // MARK: - Appearance & Theme Section
                 Section {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Choose how Sonorist looks on your device.")
@@ -534,22 +613,17 @@ public struct MobileSettingsView: View {
                         .foregroundColor(.secondary)
                 }
             }
-            .navigationTitle("Settings")
             #if os(iOS)
             .listStyle(.insetGrouped)
             #else
             .listStyle(.inset)
             #endif
-            .toolbar {
-                if isPresentedAsSheet {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Done") {
-                            dismiss()
-                        }
-                        .font(.system(size: 16, weight: .semibold))
-                    }
-                }
-            }
+        }
+        .navigationTitle("Settings")
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .navigationBar)
+        #endif
             .alert("Clear Music Cache?", isPresented: $model.showClearCacheAlert) {
                 Button("Cancel", role: .cancel) {}
                 Button("Clear All", role: .destructive) {
@@ -618,6 +692,13 @@ public struct MobileSettingsView: View {
                     #endif
                 }
             }
+            .sheet(isPresented: $model.showBackupStatusSheet) {
+                BackupProgressSheetView(model: model)
+                    .preferredColorScheme(themeManager.currentTheme.colorScheme)
+                    .presentationDetents([.fraction(0.44), .medium])
+                    .presentationDragIndicator(.visible)
+                    .presentationCornerRadius(28)
+            }
         }
     }
     
@@ -674,3 +755,148 @@ struct ActivityViewControllerRepresentable: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 #endif
+
+// MARK: - Backup Progress & Peace-of-Mind Completion Sheet
+public struct BackupProgressSheetView: View {
+    @ObservedObject var model: MobileSettingsModel
+    @Environment(\.dismiss) private var dismiss
+    
+    public var body: some View {
+        VStack(spacing: 20) {
+            if let error = model.backupFailedError {
+                // Failure State
+                ZStack {
+                    Circle()
+                        .fill(Color.red.opacity(0.12))
+                        .frame(width: 64, height: 64)
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 32, weight: .semibold))
+                        .foregroundColor(.red)
+                }
+                .padding(.top, 8)
+                
+                VStack(spacing: 6) {
+                    Text("Operation Failed")
+                        .font(.system(size: 19, weight: .bold, design: .rounded))
+                    Text(error)
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+                }
+                
+                Button("Dismiss") {
+                    dismiss()
+                }
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(FluidTheme.musicRed)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .padding(.horizontal, 24)
+            } else if model.backupIsCompleted {
+                // Success State (Peace of mind)
+                ZStack {
+                    Circle()
+                        .fill(FluidTheme.downloadGreen.opacity(0.15))
+                        .frame(width: 68, height: 68)
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 44, weight: .semibold))
+                        .foregroundColor(FluidTheme.downloadGreen)
+                }
+                .padding(.top, 8)
+                
+                VStack(spacing: 6) {
+                    Text(model.backupResultTitle)
+                        .font(.system(size: 20, weight: .bold, design: .rounded))
+                    
+                    Text(model.backupResultMessage)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+                }
+                
+                VStack(spacing: 10) {
+                    if model.exportedBackupURL != nil {
+                        Button {
+                            model.showShareSheet = true
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "square.and.arrow.up")
+                                    .font(.system(size: 15, weight: .semibold))
+                                Text("Share / Save Backup File")
+                                    .font(.system(size: 15, weight: .semibold))
+                            }
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(FluidTheme.musicRed)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        }
+                        
+                        Button("Done") {
+                            dismiss()
+                        }
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .padding(.vertical, 4)
+                    } else {
+                        Button("Done") {
+                            dismiss()
+                        }
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(FluidTheme.musicRed)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 4)
+            } else {
+                // Live Progress State
+                ZStack {
+                    Circle()
+                        .fill(FluidTheme.musicRed.opacity(0.1))
+                        .frame(width: 60, height: 60)
+                    Image(systemName: model.backupOperationType.contains("Restor") ? "arrow.down.doc.fill" : "arrow.up.doc.fill")
+                        .font(.system(size: 28, weight: .semibold))
+                        .foregroundColor(FluidTheme.musicRed)
+                }
+                .padding(.top, 10)
+                
+                VStack(spacing: 6) {
+                    Text(model.backupOperationType)
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                    
+                    Text(model.backupStatusMessage)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.secondary)
+                }
+                
+                VStack(spacing: 8) {
+                    ProgressView(value: max(0.04, model.backupProgress), total: 1.0)
+                        .tint(FluidTheme.musicRed)
+                        .scaleEffect(x: 1, y: 1.6, anchor: .center)
+                    
+                    HStack {
+                        Text("\(Int(model.backupProgress * 100))%")
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundColor(FluidTheme.musicRed)
+                        Spacer()
+                        Text("Please keep Sonorist open")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.secondary.opacity(0.8))
+                    }
+                }
+                .padding(.horizontal, 28)
+                .padding(.top, 6)
+            }
+        }
+        .padding(.vertical, 20)
+        .interactiveDismissDisabled(!model.backupIsCompleted && model.backupFailedError == nil)
+    }
+}
