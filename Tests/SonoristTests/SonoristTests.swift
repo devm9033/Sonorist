@@ -1680,6 +1680,64 @@ struct SonoristTestsRunner {
             }
         }
         
+        // MARK: - 68. SonoristBackupManager Songs Only Binary Export
+        testAsync("SonoristBackupManager: Songs Only Binary Export & Zero Base64 Bloat") {
+            let cache = MediaCacheManager.shared
+            let testId = "test_song_binary_123"
+            let dummyAudio = Data(repeating: 0x41, count: 512)
+            let dummyTrack = Track(id: testId, title: "Test Binary Song", artist: "Artist", durationSeconds: 180)
+            let bundleData = try SonoristBundleEngine.pack(track: dummyTrack, audioData: dummyAudio)
+            
+            let fileURL = cache.libraryDirectory.appendingPathComponent("\(testId).sonorist")
+            try bundleData.write(to: fileURL)
+            defer { try? FileManager.default.removeItem(at: fileURL) }
+            
+            cache.reloadManifest()
+            
+            let exportURL = try await SonoristBackupManager.exportSongsBackup()
+            defer { try? FileManager.default.removeItem(at: exportURL) }
+            
+            guard FileManager.default.fileExists(atPath: exportURL.path) else {
+                throw TestError("Exported songs backup file not found")
+            }
+            
+            let exportedData = try Data(contentsOf: exportURL)
+            guard exportedData.starts(with: SonoristBackupManager.songsMagicHeader) else {
+                throw TestError("Exported file missing SONORIST_SONGS magic header")
+            }
+            
+            try FileManager.default.removeItem(at: fileURL)
+            
+            let summary = try await SonoristBackupManager.importBackup(from: exportURL)
+            guard summary.audioRestoredCount > 0 else {
+                throw TestError("Expected audioRestoredCount > 0")
+            }
+            guard FileManager.default.fileExists(atPath: fileURL.path) else {
+                throw TestError("Expected song file to be restored on disk")
+            }
+        }
+
+        // MARK: - 69. ListeningAnalyticsManager Zero Fake Metrics
+        test("ListeningAnalyticsManager: Zero Fake Metrics When Empty & Analyzing Fallback") {
+            let manager = ListeningAnalyticsManager.shared
+            
+            if manager.listeningJournal.isEmpty {
+                guard manager.completionPercentage == 0.0 else {
+                    throw TestError("Expected 0.0 completion percentage when journal is empty, got \(manager.completionPercentage)")
+                }
+            }
+            
+            let fakeSlot = TimeOfDaySlot.morning
+            if manager.timeSlotDistribution.values.reduce(0, +) == 0 {
+                guard manager.timeSlotPercentage(for: fakeSlot) == 0.0 else {
+                    throw TestError("Expected 0.0 time slot percentage when no plays logged, got \(manager.timeSlotPercentage(for: fakeSlot))")
+                }
+                guard manager.primaryTimeOfDay == "Analyzing..." else {
+                    throw TestError("Expected 'Analyzing...' for primary time of day when empty")
+                }
+            }
+        }
+        
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         print("  Results: \(passed) passed, \(failed) failed")
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")

@@ -359,6 +359,14 @@ public final class ListeningAnalyticsManager: ObservableObject {
         return "\(hours)h \(mins)m"
     }
     
+    public var hasCircadianData: Bool {
+        timeSlotDistribution.values.reduce(0, +) > 0
+    }
+    
+    public var hasJournalData: Bool {
+        !listeningJournal.isEmpty
+    }
+
     public var primaryTimeOfDay: String {
         let sorted = timeSlotDistribution.sorted { $0.value > $1.value }
         if let top = sorted.first, top.value > 0 {
@@ -369,7 +377,7 @@ public final class ListeningAnalyticsManager: ObservableObject {
             case .night: return "Night Owl Session"
             }
         }
-        return "Daytime Listener"
+        return "Analyzing..."
     }
     
     public var peakListeningWindow: String {
@@ -377,11 +385,11 @@ public final class ListeningAnalyticsManager: ObservableObject {
         if let top = sorted.first, top.value > 0 {
             return top.key.rawValue
         }
-        return "Afternoon (12 PM - 5 PM)"
+        return "Analyzing..."
     }
     
     public var completionPercentage: Double {
-        guard !listeningJournal.isEmpty else { return 0.92 }
+        guard !listeningJournal.isEmpty else { return 0.0 }
         let full = listeningJournal.filter { $0.completedFullSong }.count
         return Double(full) / Double(listeningJournal.count)
     }
@@ -389,12 +397,12 @@ public final class ListeningAnalyticsManager: ObservableObject {
     public var completionCounts: (fullPlays: Int, earlySkips: Int, total: Int) {
         let full = listeningJournal.filter { $0.completedFullSong }.count
         let skips = listeningJournal.filter { $0.wasSkippedEarly }.count
-        return (fullPlays: full, earlySkips: skips, total: max(1, listeningJournal.count))
+        return (fullPlays: full, earlySkips: skips, total: max(0, listeningJournal.count))
     }
     
     public func timeSlotPercentage(for slot: TimeOfDaySlot) -> Double {
         let total = timeSlotDistribution.values.reduce(0, +)
-        guard total > 0 else { return 0.25 }
+        guard total > 0 else { return 0.0 }
         let count = timeSlotDistribution[slot, default: 0]
         return Double(count) / Double(total)
     }

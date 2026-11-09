@@ -27,7 +27,7 @@ public struct BackupRestoreSummary: Sendable {
     }
 }
 
-/// Comprehensive, portable Sonorist Backup Package
+/// Comprehensive, portable Sonorist Settings & Library Package
 public struct SonoristBackupPackage: Codable, Sendable {
     public let version: Int
     public let timestamp: Date
@@ -64,22 +64,46 @@ public struct SonoristBackupPackage: Codable, Sendable {
     // 5. Offline Song Manifest
     public let offlineManifest: [Track]
     
-    // 6. Optional Embedded Audio Bundles (For Full Offline Vault Archives)
-    // Key: trackId, Value: raw .sonorist binary payload
+    // 6. Optional Embedded Audio Bundles (For backward compatibility)
     public let embeddedAudioBundles: [String: Data]?
 }
 
 /// Enterprise-grade, lossless backup and restore engine for Sonorist
 public enum SonoristBackupManager {
     public static let magicHeader = "SONORIST_BACKUP".data(using: .utf8)! // 15 bytes
+    public static let songsMagicHeader = "SONORIST_SONGS".data(using: .utf8)! // 14 bytes
     public static let currentVersion: UInt16 = 1
+    
+    // MARK: - Size Estimations
+    
+    public static func calculateSettingsBackupSize() -> (bytes: Int64, formatted: String) {
+        return (65_536, "~64 KB")
+    }
+    
+    public static func calculateSongsBackupSize() -> (bytes: Int64, formatted: String) {
+        let cache = MediaCacheManager.shared
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: cache.libraryDirectory.path)) ?? []
+        let sonoristFiles = files.filter { $0.hasSuffix(".sonorist") }
+        var totalBytes: Int64 = 0
+        for filename in sonoristFiles {
+            let fileURL = cache.libraryDirectory.appendingPathComponent(filename)
+            if let attrs = try? FileManager.default.attributesOfItem(atPath: fileURL.path),
+               let size = attrs[.size] as? Int64 {
+                totalBytes += size
+            }
+        }
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useKB, .useMB, .useGB]
+        formatter.countStyle = .file
+        let text = formatter.string(fromByteCount: totalBytes)
+        return (totalBytes, text)
+    }
     
     // MARK: - Export
     
-    /// Exports all settings, API keys, playlists, favorites, insights, and offline manifests.
-    /// If `includeAudio` is true, embeds all actual offline audio files into a single vault file.
+    /// Exports Playlists, Custom Folders, Favorites, Preferences, AI Config, and Telemetry (No Audio Bloat).
     @MainActor
-    public static func exportBackup(includeAudio: Bool = false) async throws -> URL {
+    public static func exportSettingsBackup() async throws -> URL {
         let player = AudioPlayerEngine.shared
         let aiConfig = AIProviderConfig.shared
         let themeManager = AppThemeManager.shared
@@ -88,18 +112,6 @@ public enum SonoristBackupManager {
         let cache = MediaCacheManager.shared
         
         let offlineTracks = cache.getAllCachedTracks()
-        
-        var embeddedBundles: [String: Data]? = nil
-        if includeAudio {
-            var bundles: [String: Data] = [:]
-            for track in offlineTracks {
-                let fileURL = cache.libraryDirectory.appendingPathComponent("\(track.id).sonorist")
-                if let data = try? Data(contentsOf: fileURL) {
-                    bundles[track.id] = data
-                }
-            }
-            embeddedBundles = bundles
-        }
         
         let package = SonoristBackupPackage(
             version: 1,
@@ -126,7 +138,7 @@ public enum SonoristBackupManager {
             formatDistribution: analytics.formatDistribution,
             timeSlotDistribution: analytics.timeSlotDistribution,
             offlineManifest: offlineTracks,
-            embeddedAudioBundles: embeddedBundles
+            embeddedAudioBundles: nil
         )
         
         let jsonData = try JSONEncoder().encode(package)
@@ -138,22 +150,76 @@ public enum SonoristBackupManager {
         payload.append(Data(bytes: &version, count: MemoryLayout<UInt16>.size))
         payload.append(jsonData)
         
-        // Write to a temporary file
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd_HHmm"
         let dateStr = dateFormatter.string(from: Date())
-        
-        let ext = includeAudio ? "sonorist-vault" : "sonorist-backup"
-        let filename = "Sonorist_Backup_\(dateStr).\(ext)"
+        let filename = "Sonorist_Playlists_Settings_\(dateStr).sonorist-backup"
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
         
         try payload.write(to: tempURL, options: .atomic)
         return tempURL
     }
     
+    /// Exports ONLY downloaded offline songs directly in high-efficiency binary container (Zero Base64 overhead).
+    @MainActor
+    public static func exportSongsBackup() async throws -> URL {
+        let cache = MediaCacheManager.shared
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: cache.libraryDirectory.path)) ?? []
+        let sonoristFiles = files.filter { $0.hasSuffix(".sonorist") }
+        
+        var payload = Data()
+        // 1. Magic Header (14 bytes)
+        payload.append(songsMagicHeader)
+        
+        // 2. Version (UInt16, 2 bytes)
+        var version: UInt16 = currentVersion.littleEndian
+        payload.append(Data(bytes: &version, count: MemoryLayout<UInt16>.size))
+        
+        // 3. Track Count (UInt32, 4 bytes)
+        var count: UInt32 = UInt32(sonoristFiles.count).littleEndian
+        payload.append(Data(bytes: &count, count: MemoryLayout<UInt32>.size))
+        
+        // 4. Sequential Song Bundles (Direct raw binary chunks)
+        for filename in sonoristFiles {
+            let trackId = String(filename.dropLast(".sonorist".count))
+            let fileURL = cache.libraryDirectory.appendingPathComponent(filename)
+            guard let fileData = try? Data(contentsOf: fileURL) else { continue }
+            
+            // Video ID (Length-prefixed UTF-8)
+            let idBytes = Array(trackId.utf8)
+            var idLen: UInt16 = UInt16(idBytes.count).littleEndian
+            payload.append(Data(bytes: &idLen, count: MemoryLayout<UInt16>.size))
+            payload.append(contentsOf: idBytes)
+            
+            // File Data (Length-prefixed binary)
+            var dataLen: UInt64 = UInt64(fileData.count).littleEndian
+            payload.append(Data(bytes: &dataLen, count: MemoryLayout<UInt64>.size))
+            payload.append(fileData)
+        }
+        
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd_HHmm"
+        let dateStr = dateFormatter.string(from: Date())
+        let filename = "Sonorist_Songs_\(dateStr).sonorist-songs"
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+        
+        try payload.write(to: tempURL, options: .atomic)
+        return tempURL
+    }
+    
+    /// Backward-compatible wrapper
+    @MainActor
+    public static func exportBackup(includeAudio: Bool = false) async throws -> URL {
+        if includeAudio {
+            return try await exportSongsBackup()
+        } else {
+            return try await exportSettingsBackup()
+        }
+    }
+    
     // MARK: - Import & Restore
     
-    /// Restores full state from a given backup file URL.
+    /// Restores state or songs from a given backup file URL.
     @MainActor
     public static func importBackup(from url: URL) async throws -> BackupRestoreSummary {
         let isSecurityScoped = url.startAccessingSecurityScopedResource()
@@ -165,28 +231,79 @@ public enum SonoristBackupManager {
         
         let data = try Data(contentsOf: url)
         
-        // Validate magic header
-        guard data.count > magicHeader.count + 2 else {
-            throw NSError(domain: "SonoristBackupManager", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid backup file size."])
+        // 1. Detect Songs Only format
+        if data.starts(with: songsMagicHeader) {
+            return try restoreSongs(from: data)
         }
         
-        let header = data.prefix(magicHeader.count)
-        guard header == magicHeader else {
-            // Also accept raw JSON package for developer convenience
-            if let rawPackage = try? JSONDecoder().decode(SonoristBackupPackage.self, from: data) {
-                return try applyPackage(rawPackage)
+        // 2. Detect Settings format
+        if data.starts(with: magicHeader) {
+            let offset = magicHeader.count + 2 // header + version
+            guard data.count > offset else {
+                throw NSError(domain: "SonoristBackupManager", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid backup file size."])
             }
-            throw NSError(domain: "SonoristBackupManager", code: 401, userInfo: [NSLocalizedDescriptionKey: "Invalid backup format or corrupted file header."])
+            let jsonPayload = data.subdata(in: offset..<data.count)
+            let package = try JSONDecoder().decode(SonoristBackupPackage.self, from: jsonPayload)
+            return try applyPackage(package)
         }
         
-        let offset = magicHeader.count + 2 // header + version
-        let jsonPayload = data.subdata(in: offset..<data.count)
+        // 3. Fallback: Raw JSON package
+        if let rawPackage = try? JSONDecoder().decode(SonoristBackupPackage.self, from: data) {
+            return try applyPackage(rawPackage)
+        }
         
-        let package = try JSONDecoder().decode(SonoristBackupPackage.self, from: jsonPayload)
-        return try applyPackage(package)
+        throw NSError(domain: "SonoristBackupManager", code: 401, userInfo: [NSLocalizedDescriptionKey: "Invalid backup format or unrecognized file header."])
     }
     
-    // MARK: - Restore Application
+    // MARK: - Private Restore Helpers
+    
+    @MainActor
+    private static func restoreSongs(from data: Data) throws -> BackupRestoreSummary {
+        let offset = songsMagicHeader.count + 2 // header + version
+        guard data.count >= offset + 4 else {
+            throw NSError(domain: "SonoristBackupManager", code: 400, userInfo: [NSLocalizedDescriptionKey: "Corrupted songs backup file."])
+        }
+        
+        var currentOffset = offset
+        let count: UInt32 = data.subdata(in: currentOffset..<(currentOffset + 4)).withUnsafeBytes { $0.load(as: UInt32.self) }.littleEndian
+        currentOffset += 4
+        
+        let cache = MediaCacheManager.shared
+        var restoredCount = 0
+        
+        for _ in 0..<count {
+            guard currentOffset + 2 <= data.count else { break }
+            let idLen: UInt16 = data.subdata(in: currentOffset..<(currentOffset + 2)).withUnsafeBytes { $0.load(as: UInt16.self) }.littleEndian
+            currentOffset += 2
+            
+            guard currentOffset + Int(idLen) <= data.count else { break }
+            let idData = data.subdata(in: currentOffset..<(currentOffset + Int(idLen)))
+            guard let trackId = String(data: idData, encoding: .utf8) else { break }
+            currentOffset += Int(idLen)
+            
+            guard currentOffset + 8 <= data.count else { break }
+            let dataLen: UInt64 = data.subdata(in: currentOffset..<(currentOffset + 8)).withUnsafeBytes { $0.load(as: UInt64.self) }.littleEndian
+            currentOffset += 8
+            
+            guard currentOffset + Int(dataLen) <= data.count else { break }
+            let bundleData = data.subdata(in: currentOffset..<(currentOffset + Int(dataLen)))
+            currentOffset += Int(dataLen)
+            
+            let targetURL = cache.libraryDirectory.appendingPathComponent("\(trackId).sonorist")
+            try? bundleData.write(to: targetURL, options: .atomic)
+            restoredCount += 1
+        }
+        
+        cache.reloadManifest()
+        return BackupRestoreSummary(
+            playlistCount: 0,
+            favoriteCount: 0,
+            totalSongsPlayed: 0,
+            audioRestoredCount: restoredCount,
+            offlineSongsNeedDownload: [],
+            hasApiKey: false
+        )
+    }
     
     @MainActor
     private static func applyPackage(_ package: SonoristBackupPackage) throws -> BackupRestoreSummary {
@@ -248,7 +365,6 @@ public enum SonoristBackupManager {
             }
             cache.reloadManifest()
         } else {
-            // Check which tracks are already in cache vs which need re-downloading
             for track in package.offlineManifest {
                 if !cache.isCached(videoId: track.id) {
                     needsDownload.append(track)

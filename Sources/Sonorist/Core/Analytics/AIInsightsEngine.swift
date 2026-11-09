@@ -301,25 +301,41 @@ public final class AIInsightsEngine: ObservableObject {
     public func generateHeuristicStory(tone: AIInsightsTone = .analytical) -> AIInsightsStory {
         let manager = ListeningAnalyticsManager.shared
         let top = manager.topTracks
+        
+        guard manager.totalSongsPlayed > 0, let topTrack = top.first?.track else {
+            return AIInsightsStory(
+                archetypeTitle: "Analyzing Music Profile...",
+                archetypeDescription: "Listening patterns will populate as you play songs.",
+                narrativeStory: "Sonorist is analyzing your listening habits in real time. As you play songs, your personal music profile and listening patterns will appear here.",
+                obsessionSongTitle: nil,
+                obsessionArtist: nil,
+                obsessionInsight: nil,
+                peakListeningHour: "Analyzing...",
+                patienceRateText: "Analyzing...",
+                modelUsed: "On-Device",
+                generatedAt: Date(),
+                tone: tone
+            )
+        }
+        
         let languages = computedLanguageSpectrum
         let primaryLang = languages.first?.language ?? "Eclectic"
-        let topTrack = top.first?.track
         let topCount = top.first?.playCount ?? 1
         let completionPct = "\(Int(manager.completionPercentage * 100))%"
         
-        let archetypeTitle = "\(primaryLang) Acoustic Soundscape"
-        let archetypeDesc = "Your listening centers around \(primaryLang.lowercased()) melodic arrangements with high completion rates."
-        let artistName = topTrack?.artist ?? "featured artists"
-        let peakWindow = manager.peakListeningWindow.components(separatedBy: " (").first ?? "Evening"
-        let story = "Your playback log reflects deep engagement with \(artistName) and melodic arrangements, peaking in the \(peakWindow.lowercased()). You listen through \(completionPct) of tracks to completion with minimal early skips."
+        let archetypeTitle = "\(primaryLang) Soundscape"
+        let archetypeDesc = "Your listening centers around \(primaryLang.lowercased()) melodic arrangements."
+        let artistName = topTrack.artist
+        let peakWindow = manager.peakListeningWindow
+        let story = "Your playback log reflects authentic engagement with \(artistName), peaking in the \(peakWindow.lowercased()). You listen through \(completionPct) of tracks to completion."
         
         return AIInsightsStory(
             archetypeTitle: archetypeTitle,
             archetypeDescription: archetypeDesc,
             narrativeStory: story,
-            obsessionSongTitle: topTrack?.title,
-            obsessionArtist: topTrack?.artist,
-            obsessionInsight: topTrack != nil ? "Played \(topCount)x in full rotation" : nil,
+            obsessionSongTitle: topTrack.title,
+            obsessionArtist: topTrack.artist,
+            obsessionInsight: "Played \(topCount)x in rotation",
             peakListeningHour: peakWindow,
             patienceRateText: "\(completionPct) Full Completion",
             modelUsed: "On-Device Synthesis",

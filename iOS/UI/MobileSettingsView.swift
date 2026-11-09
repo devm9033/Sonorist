@@ -19,16 +19,24 @@ public final class MobileSettingsModel: ObservableObject {
     @Published public var isImportingBackup: Bool = false
     @Published public var exportedBackupURL: URL? = nil
     @Published public var showShareSheet: Bool = false
+    @Published public var settingsBackupSizeText: String = "~64 KB"
+    @Published public var songsBackupSizeText: String = "0 MB"
     
     public init() {
         self.storageLimitGB = MediaCacheManager.shared.maxStorageLimitGB
+        updateBackupEstimates()
     }
     
-    public func exportBackup(includeAudio: Bool) {
+    public func updateBackupEstimates() {
+        self.settingsBackupSizeText = SonoristBackupManager.calculateSettingsBackupSize().formatted
+        self.songsBackupSizeText = SonoristBackupManager.calculateSongsBackupSize().formatted
+    }
+    
+    public func exportSettingsBackup() {
         isExportingBackup = true
         Task {
             do {
-                let url = try await SonoristBackupManager.exportBackup(includeAudio: includeAudio)
+                let url = try await SonoristBackupManager.exportSettingsBackup()
                 await MainActor.run {
                     self.isExportingBackup = false
                     self.exportedBackupURL = url
@@ -44,6 +52,34 @@ public final class MobileSettingsModel: ObservableObject {
         }
     }
     
+    public func exportSongsBackup() {
+        isExportingBackup = true
+        Task {
+            do {
+                let url = try await SonoristBackupManager.exportSongsBackup()
+                await MainActor.run {
+                    self.isExportingBackup = false
+                    self.exportedBackupURL = url
+                    self.showShareSheet = true
+                    MobileHaptics.trigger(.medium)
+                }
+            } catch {
+                await MainActor.run {
+                    self.isExportingBackup = false
+                    MobileToastManager.shared.show(message: "Export Failed: \(error.localizedDescription)", icon: "xmark.circle")
+                }
+            }
+        }
+    }
+    
+    public func exportBackup(includeAudio: Bool) {
+        if includeAudio {
+            exportSongsBackup()
+        } else {
+            exportSettingsBackup()
+        }
+    }
+    
     public func importBackup(from url: URL) {
         isImportingBackup = true
         Task {
@@ -52,13 +88,20 @@ public final class MobileSettingsModel: ObservableObject {
                 await MainActor.run {
                     self.isImportingBackup = false
                     MobileHaptics.trigger(.heavy)
-                    let audioNote = summary.audioRestoredCount > 0 ? " • \(summary.audioRestoredCount) songs" : ""
-                    MobileToastManager.shared.show(
-                        message: "Restored \(summary.playlistCount) playlists\(audioNote) & settings!",
-                        icon: "checkmark.circle.fill"
-                    )
+                    if summary.audioRestoredCount > 0 && summary.playlistCount == 0 {
+                        MobileToastManager.shared.show(
+                            message: "Restored \(summary.audioRestoredCount) offline songs!",
+                            icon: "checkmark.circle.fill"
+                        )
+                    } else {
+                        MobileToastManager.shared.show(
+                            message: "Restored \(summary.playlistCount) playlists & settings!",
+                            icon: "checkmark.circle.fill"
+                        )
+                    }
                     MobileLibraryModel.shared.loadOfflineTracks()
                     AIPlaylistEngine.shared.reconcileWithCachedTracks()
+                    self.updateBackupEstimates()
                 }
             } catch {
                 await MainActor.run {
@@ -388,10 +431,10 @@ public struct MobileSettingsView: View {
                         HStack {
                             Label {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text("Export Backup Package")
+                                    Text("Export Backup")
                                         .font(.system(size: 15, weight: .semibold))
                                         .foregroundColor(.primary)
-                                    Text("Settings, API keys, playlists & up to 1 MB of listening logs")
+                                    Text("Playlists, settings or offline songs")
                                         .font(.system(size: 11))
                                         .foregroundColor(.secondary)
                                 }
@@ -420,10 +463,10 @@ public struct MobileSettingsView: View {
                         HStack {
                             Label {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text("Restore from Backup File")
+                                    Text("Restore from Backup")
                                         .font(.system(size: 15, weight: .semibold))
                                         .foregroundColor(.primary)
-                                    Text("Import from iCloud Drive or local Files (.sonorist-backup)")
+                                    Text("Import from iCloud Drive or Files (.sonorist-backup, .sonorist-songs)")
                                         .font(.system(size: 11))
                                         .foregroundColor(.secondary)
                                 }
@@ -448,7 +491,7 @@ public struct MobileSettingsView: View {
                         .font(.system(size: 12, weight: .bold))
                         .foregroundColor(.secondary)
                 } footer: {
-                    Text("Exports are signed and encrypted. Lightweight backups (~80 KB) contain all settings, playlists, favorites, and telemetry manifests.")
+                    Text("Playlists and settings backups are lightweight files. Songs backups package your downloaded music files directly without extra storage overhead.")
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
                 }
@@ -503,6 +546,7 @@ public struct MobileSettingsView: View {
             }
             .onAppear {
                 calculateCacheSize()
+                model.updateBackupEstimates()
             }
             .sheet(isPresented: $model.showEqualizerSheet) {
                 MobileEqualizerSheet()
@@ -512,19 +556,19 @@ public struct MobileSettingsView: View {
                     .presentationCornerRadius(28)
             }
             .confirmationDialog(
-                "Choose Backup Format",
+                "Backup Library",
                 isPresented: $model.showBackupDialog,
                 titleVisibility: .visible
             ) {
-                Button("Lightweight Backup (Playlists & Settings, ~80 KB)") {
-                    model.exportBackup(includeAudio: false)
+                Button("Playlists & Settings (\(model.settingsBackupSizeText))") {
+                    model.exportSettingsBackup()
                 }
-                Button("Full Offline Vault (Include Downloaded Songs)") {
-                    model.exportBackup(includeAudio: true)
+                Button("Songs Only (\(model.songsBackupSizeText))") {
+                    model.exportSongsBackup()
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Lightweight backups preserve all settings, API keys, playlists, favorites, and listening logs. Full vaults also bundle your offline audio files.")
+                Text("Select what you would like to export:")
             }
             .fileImporter(
                 isPresented: $model.showFileImporter,
