@@ -286,17 +286,7 @@ public final class MediaCacheManager: @unchecked Sendable {
                     t.isCached = true
                     t.streamURL = nil
                     let artFileURL = self.artworkDirectory.appendingPathComponent("\(vid).jpg")
-                    if fileManager.fileExists(atPath: artFileURL.path) {
-                        t.artworkURL = artFileURL
-                    } else if filename.hasSuffix(".sonorist"),
-                              let data = try? Data(contentsOf: fileURL),
-                              let meta = try? SonoristBundleEngine.readMetadataOnly(from: data),
-                              let artData = meta.artworkData, !artData.isEmpty {
-                        try? artData.write(to: artFileURL, options: .atomic)
-                        if fileManager.fileExists(atPath: artFileURL.path) {
-                            t.artworkURL = artFileURL
-                        }
-                    }
+                    t.artworkURL = fileManager.fileExists(atPath: artFileURL.path) ? artFileURL : nil
                     valid.append(t)
                     continue
                 }
@@ -309,16 +299,8 @@ public final class MediaCacheManager: @unchecked Sendable {
                         t.isCached = true
                         t.streamURL = nil // Never set streamURL to the raw .sonorist bundle file
                         
-                        // Extract and link local file artwork for flawless offline display
                         let artFileURL = self.artworkDirectory.appendingPathComponent("\(vid).jpg")
-                        if fileManager.fileExists(atPath: artFileURL.path) {
-                            t.artworkURL = artFileURL
-                        } else if let artData = meta.artworkData, !artData.isEmpty {
-                            try? artData.write(to: artFileURL, options: .atomic)
-                            if fileManager.fileExists(atPath: artFileURL.path) {
-                                t.artworkURL = artFileURL
-                            }
-                        }
+                        t.artworkURL = fileManager.fileExists(atPath: artFileURL.path) ? artFileURL : nil
                         
                         valid.append(t)
                         self.cachedTracksMetadata[vid] = t
@@ -626,13 +608,22 @@ public final class MediaCacheManager: @unchecked Sendable {
     /// Synchronously and completely clears only the local artwork thumbnail cache
     public func clearArtworkCache() {
         queue.sync {
-            try? self.fileManager.removeItem(at: self.artworkDirectory)
+            if let files = try? self.fileManager.contentsOfDirectory(at: self.artworkDirectory, includingPropertiesForKeys: nil) {
+                for file in files {
+                    try? self.fileManager.removeItem(at: file)
+                }
+            } else {
+                try? self.fileManager.removeItem(at: self.artworkDirectory)
+            }
             self.setupDirectories(force: true)
+            
+            for (vid, track) in self.cachedTracksMetadata {
+                var updated = track
+                updated.artworkURL = nil
+                self.cachedTracksMetadata[vid] = updated
+            }
         }
         ArtworkImageCache.shared.clear()
-        DispatchQueue.main.async {
-            NotificationCenter.default.post(name: AudioPlayerEngine.trackDidCacheNotification, object: nil)
-        }
     }
     
     /// Returns the total disk bytes used by the artwork cache
@@ -909,52 +900,6 @@ public final class ArtworkImageCache: ObservableObject, @unchecked Sendable {
                     return image
                 }
                 #endif
-                
-                // Self-healing: Local artwork file is missing or corrupted on disk!
-                let trackId = url.deletingPathExtension().lastPathComponent
-                if !trackId.isEmpty && !trackId.hasPrefix("local_") {
-                    // 1a. Try extracting from .sonorist bundle
-                    if let restoredArt = MediaCacheManager.shared.cachedArtworkURL(for: trackId),
-                       let restoredData = try? Data(contentsOf: restoredArt) {
-                        #if canImport(UIKit)
-                        if let image = UIImage(data: restoredData) {
-                            self?.cache.setObject(image, forKey: url as NSURL)
-                            DispatchQueue.main.async { self?.cacheRevision &+= 1 }
-                            return image
-                        }
-                        #elseif canImport(AppKit)
-                        if let image = NSImage(data: restoredData) {
-                            self?.cache.setObject(image, forKey: url as NSURL)
-                            DispatchQueue.main.async { self?.cacheRevision &+= 1 }
-                            return image
-                        }
-                        #endif
-                    }
-                    
-                    // 1b. Try self-healing download from YouTube
-                    if let ytURL = URL(string: "https://i.ytimg.com/vi/\(trackId)/hqdefault.jpg"),
-                       let safeURL = SecurityAudit.validateURL(ytURL.absoluteString) {
-                        var req = URLRequest(url: safeURL)
-                        req.timeoutInterval = 7
-                        if let (data, resp) = try? await session.data(for: req),
-                           (resp as? HTTPURLResponse)?.statusCode == 200 && data.count > 1024 {
-                            try? data.write(to: url, options: .atomic)
-                            #if canImport(UIKit)
-                            if let image = UIImage(data: data) {
-                                self?.cache.setObject(image, forKey: url as NSURL)
-                                DispatchQueue.main.async { self?.cacheRevision &+= 1 }
-                                return image
-                            }
-                            #elseif canImport(AppKit)
-                            if let image = NSImage(data: data) {
-                                self?.cache.setObject(image, forKey: url as NSURL)
-                                DispatchQueue.main.async { self?.cacheRevision &+= 1 }
-                                return image
-                            }
-                            #endif
-                        }
-                    }
-                }
                 return nil
             }
             

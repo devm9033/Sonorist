@@ -794,7 +794,16 @@ public struct MobileSettingsView: View {
             let formatted = formatter.string(fromByteCount: finalBytes)
             
             let artBytes = cache.getArtworkCacheSizeBytes()
-            let formattedArt = formatter.string(fromByteCount: artBytes)
+            let formattedArt: String
+            if artBytes <= 0 {
+                formattedArt = "0 KB"
+            } else if artBytes < 1024 * 1024 {
+                let kb = max(1, artBytes / 1024)
+                formattedArt = "\(kb) KB"
+            } else {
+                let mb = Double(artBytes) / 1048576.0
+                formattedArt = String(format: "%.1f MB", mb)
+            }
             
             await MainActor.run {
                 model.cacheSizeBytes = finalBytes
@@ -808,7 +817,7 @@ public struct MobileSettingsView: View {
         Task.detached(priority: .userInitiated) {
             await MainActor.run {
                 AudioPlayerEngine.shared.clearAllOfflineDownloads()
-                MobileToastManager.shared.show(message: "Library & Cache Cleared", icon: "trash")
+                MobileHaptics.trigger(.heavy)
             }
             await self.calculateCacheSize()
         }
@@ -818,7 +827,8 @@ public struct MobileSettingsView: View {
         Task.detached(priority: .userInitiated) {
             MediaCacheManager.shared.clearArtworkCache()
             await MainActor.run {
-                MobileToastManager.shared.show(message: "Album Art Cache Cleared", icon: "photo")
+                model.artworkCacheSizeText = "0 KB"
+                MobileHaptics.trigger(.heavy)
             }
             await self.calculateCacheSize()
         }

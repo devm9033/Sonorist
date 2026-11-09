@@ -1852,6 +1852,15 @@ struct SonoristTestsRunner {
             guard cache.getArtworkCacheSizeBytes() == 0 else {
                 throw TestError("Expected artwork cache size to be 0 after clearArtworkCache")
             }
+            
+            // Calling getAllCachedTracks must NOT automatically re-extract artwork to disk
+            _ = cache.getAllCachedTracks()
+            guard !FileManager.default.fileExists(atPath: artFile.path) else {
+                throw TestError("getAllCachedTracks should NOT re-extract artwork to disk")
+            }
+            guard cache.getArtworkCacheSizeBytes() == 0 else {
+                throw TestError("Artwork cache should remain 0 after getAllCachedTracks")
+            }
         }
         
         // Final cleanup: Never leave test telemetry in user preferences
