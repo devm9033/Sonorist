@@ -42,108 +42,22 @@ public struct MobileLibraryView: View {
     
     public var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                // Segment Selector & Controls
-                VStack(alignment: .leading, spacing: 10) {
-                    // Segmented picker
-                    HStack(spacing: 8) {
-                        ForEach(MobileLibrarySegment.allCases) { seg in
-                            let isSelected = model.selectedSegment == seg
-                            Button {
-                                MobileHaptics.trigger(.selection)
-                                withAnimation(FluidTheme.fluidSpring) {
-                                    model.selectedSegment = seg
-                                }
-                            } label: {
-                                Text(seg.rawValue)
-                                    .font(.system(size: 13, weight: isSelected ? .bold : .medium))
-                                    .foregroundColor(isSelected ? .white : .primary)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 8)
-                                    .background(
-                                        Capsule()
-                                            .fill(isSelected ? FluidTheme.musicRed : Color.primary.opacity(0.06))
-                                    )
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                        }
-                        
-                        Spacer()
-                        
-                        // Shuffle Play All Button
-                        Button {
-                            MobileHaptics.trigger(.medium)
-                            let tracks = currentTracks
-                            if let first = tracks.shuffled().first {
-                                MobileNavigationCoordinator.shared.revealMiniPlayer()
-                                if model.selectedSegment == .downloaded {
-                                    player.playFromOfflineLibrary(tracks: tracks.shuffled(), selectedTrack: first)
-                                } else {
-                                    player.playFromPlaylist(tracks: tracks.shuffled(), selectedTrack: first)
-                                }
-                            }
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: "shuffle")
-                                    .font(.system(size: 13, weight: .bold))
-                                Text("Shuffle")
-                                    .font(.system(size: 12, weight: .bold))
-                            }
-                            .foregroundColor(FluidTheme.musicRed)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                    }
-                    .padding(.horizontal, 16)
-                    
-                    // Storage and song count badge for offline library
-                    if model.selectedSegment == .downloaded && !model.offlineTracks.isEmpty {
-                        HStack(spacing: 8) {
-                            Image(systemName: "arrow.down.circle.fill")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(FluidTheme.downloadGreen)
-                            Text("\(model.offlineTracks.count) \(model.offlineTracks.count == 1 ? "song" : "songs") • \(MediaCacheManager.shared.getFormattedCacheSize()) stored offline")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(.secondary)
-                            
-                            Spacer()
-                            
-                            // Clear All Downloads Button
-                            Button {
-                                MobileHaptics.trigger(.light)
-                                model.showClearAllConfirmation = true
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "trash")
-                                        .font(.system(size: 11, weight: .medium))
-                                    Text("Clear All")
-                                        .font(.system(size: 11, weight: .semibold))
-                                }
-                                .foregroundColor(.secondary)
-                                .padding(.horizontal, 9)
-                                .padding(.vertical, 4)
-                                .background(Color.primary.opacity(0.06))
-                                .clipShape(Capsule())
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.top, 2)
-                    }
+            List {
+                // 1. Segment Selector & Library Controls Header
+                segmentSelectorSection
+                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 6, trailing: 16))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+
+                // 2. Playlists Folder Row (When on Downloaded segment)
+                if model.selectedSegment == .downloaded {
+                    playlistsFolderRow
+                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
                 }
-                .padding(.top, 4)
-                .padding(.bottom, 6)
-                
-                // Track List
-                List {
-                    if model.selectedSegment == .downloaded {
-                        playlistsFolderRow
-                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
-                            .listRowSeparator(.hidden)
-                            .listRowBackground(Color.clear)
-                    }
-                
+
+                // 3. Tracks or Empty State
                 let tracks = currentTracks
                 if tracks.isEmpty {
                     VStack(spacing: 12) {
@@ -188,7 +102,17 @@ public struct MobileLibraryView: View {
             .safeAreaInset(edge: .bottom) {
                 Color.clear.frame(height: 180)
             }
+            .refreshable {
+                MobileHaptics.trigger(.medium)
+                model.loadOfflineTracks()
+                await AIPlaylistEngine.shared.reconcileWithCachedTracks()
+            }
             .id(model.refreshID)
+            .navigationTitle("Library")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.large)
+            #endif
+            .background(Color.platformSystemBackground.ignoresSafeArea())
         }
         .onAppear {
             model.loadOfflineTracks()
@@ -214,18 +138,110 @@ public struct MobileLibraryView: View {
         } message: {
             Text("This will permanently delete all \(model.offlineTracks.count) downloaded songs and free \(MediaCacheManager.shared.getFormattedCacheSize()) of storage on your iPhone.")
         }
-        .navigationTitle("Library")
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.large)
-        #endif
-        .background(Color.platformSystemBackground.ignoresSafeArea())
+    }
+
+    // MARK: - Segment Selector & Controls Section (Clean native scrollable header)
+
+    private var segmentSelectorSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Segmented picker
+            HStack(spacing: 8) {
+                ForEach(MobileLibrarySegment.allCases) { seg in
+                    let isSelected = model.selectedSegment == seg
+                    Button {
+                        MobileHaptics.trigger(.selection)
+                        withAnimation(FluidTheme.fluidSpring) {
+                            model.selectedSegment = seg
+                        }
+                    } label: {
+                        Text(seg.rawValue)
+                            .font(.system(size: 13, weight: isSelected ? .bold : .medium))
+                            .foregroundColor(isSelected ? .white : .primary)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(
+                                Capsule()
+                                    .fill(isSelected ? FluidTheme.musicRed : Color.primary.opacity(0.06))
+                            )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+                
+                Spacer()
+                
+                // Shuffle Play All Button
+                Button {
+                    MobileHaptics.trigger(.medium)
+                    let tracks = currentTracks
+                    if let first = tracks.shuffled().first {
+                        MobileNavigationCoordinator.shared.revealMiniPlayer()
+                        if model.selectedSegment == .downloaded {
+                            player.playFromOfflineLibrary(tracks: tracks.shuffled(), selectedTrack: first)
+                        } else {
+                            player.playFromPlaylist(tracks: tracks.shuffled(), selectedTrack: first)
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "shuffle")
+                            .font(.system(size: 13, weight: .bold))
+                        Text("Shuffle")
+                            .font(.system(size: 12, weight: .bold))
+                    }
+                    .foregroundColor(FluidTheme.musicRed)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+            
+            // Storage and song count badge for offline library
+            if model.selectedSegment == .downloaded && !model.offlineTracks.isEmpty {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(FluidTheme.downloadGreen)
+                    Text("\(model.offlineTracks.count) \(model.offlineTracks.count == 1 ? "song" : "songs") • \(MediaCacheManager.shared.getFormattedCacheSize()) stored offline")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.secondary)
+                    
+                    Spacer()
+                    
+                    // Clear All Downloads Button
+                    Button {
+                        MobileHaptics.trigger(.light)
+                        model.showClearAllConfirmation = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "trash")
+                                .font(.system(size: 11, weight: .medium))
+                            Text("Clear All")
+                                .font(.system(size: 11, weight: .semibold))
+                        }
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4)
+                        .background(Color.primary.opacity(0.06))
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+                .padding(.top, 2)
+            }
         }
+        .padding(.top, 4)
+        .padding(.bottom, 6)
     }
     
     private var playlistsFolderRow: some View {
-        NavigationLink {
-            AICuratedPlaylistsFolderView()
-        } label: {
+        ZStack {
+            NavigationLink {
+                AICuratedPlaylistsFolderView()
+            } label: {
+                EmptyView()
+            }
+            .opacity(0)
+
             HStack(spacing: 14) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -259,7 +275,7 @@ public struct MobileLibraryView: View {
 
                 Image(systemName: "chevron.right")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.secondary.opacity(0.5))
+                    .foregroundColor(.secondary.opacity(0.4))
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
@@ -268,7 +284,6 @@ public struct MobileLibraryView: View {
                     .fill(isLight ? Color.white : Color.platformSecondarySystemBackground)
             )
         }
-        .buttonStyle(PlainButtonStyle())
     }
     
     private var currentTracks: [Track] {
