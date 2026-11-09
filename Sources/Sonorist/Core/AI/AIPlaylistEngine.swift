@@ -1089,7 +1089,7 @@ public final class AIPlaylistEngine: ObservableObject, @unchecked Sendable {
         return ("", "folder.fill", "")
     }
 
-    private func executeLLMRequest(prompt: String, isTestPing: Bool = false, retryCount: Int = 0) async throws -> String {
+    internal func executeLLMRequest(prompt: String, isTestPing: Bool = false, retryCount: Int = 0) async throws -> String {
         let apiKey = config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: config.selectedProvider.defaultEndpoint) else {
             throw URLError(.badURL)

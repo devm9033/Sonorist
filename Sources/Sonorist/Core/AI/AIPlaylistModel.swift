@@ -383,6 +383,23 @@ public struct AICuratedLibrary: Codable, Sendable {
         self.lastUpdated = Date()
     }
 
+    /// Returns the language category containing this track, if any.
+    public func category(for trackId: String) -> AILanguageCategory? {
+        categories.first { cat in
+            cat.directTrackIds.contains(trackId) || cat.genres.contains(where: { $0.trackIds.contains(trackId) })
+        }
+    }
+
+    /// Returns the user subfolder containing this track, if any.
+    public func subfolder(for trackId: String) -> AIGenreGroup? {
+        for cat in categories {
+            if let sub = cat.genres.first(where: { $0.trackIds.contains(trackId) }) {
+                return sub
+            }
+        }
+        return nil
+    }
+
     public static func defaultIcon(for language: String) -> String {
         switch language.lowercased() {
         case "hindi", "bengali", "tamil", "telugu", "punjabi", "urdu":

@@ -1641,6 +1641,18 @@ public final class AudioPlayerEngine: ObservableObject {
             return
         }
 
+        if currentTime > 2.0 {
+            let totalDur = duration > 0 ? duration : current.durationSeconds
+            ListeningAnalyticsManager.shared.recordListeningEvent(
+                track: current,
+                secondsPlayed: currentTime,
+                totalDuration: totalDur,
+                wasSkipped: true,
+                wasRepeated: false,
+                audioFormat: current.audioFormat
+            )
+        }
+
         if currentIndex + 1 < queue.count {
             play(track: queue[currentIndex + 1])
 
@@ -1755,6 +1767,17 @@ public final class AudioPlayerEngine: ObservableObject {
         self.isCrossfading = false
         if !self.isFadingForSleepTimer {
             self.player?.volume = self.volume
+        }
+        if let current = currentTrack {
+            let totalDur = duration > 0 ? duration : current.durationSeconds
+            ListeningAnalyticsManager.shared.recordListeningEvent(
+                track: current,
+                secondsPlayed: currentTime > 0 ? currentTime : totalDur,
+                totalDuration: totalDur,
+                wasSkipped: false,
+                wasRepeated: repeatMode == .one,
+                audioFormat: current.audioFormat
+            )
         }
         ListeningAnalyticsManager.shared.flushPersistedStats()
         if sleepTimerOption == .endOfTrack {

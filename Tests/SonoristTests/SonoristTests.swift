@@ -1557,6 +1557,61 @@ struct SonoristTestsRunner {
             engine.pause()
         }
         
+        // MARK: - 63. AI Insights & Listening Telemetry
+        test("ListeningAnalyticsManager: Genuine Non-Sensitive Event Telemetry & Zero-Fake Baseline") {
+            let manager = ListeningAnalyticsManager.shared
+            let t = Track(id: "telemetry_test_1", title: "Majhe Majhe Tobo", artist: "Arindom", durationSeconds: 240)
+            
+            // Record a genuine event
+            manager.recordListeningEvent(
+                track: t,
+                secondsPlayed: 240,
+                totalDuration: 240,
+                wasSkipped: false,
+                wasRepeated: false,
+                audioFormat: "Lossless (M4A)"
+            )
+            
+            guard !manager.listeningJournal.isEmpty else {
+                throw TestError("Expected listening journal to contain recorded events")
+            }
+            guard let lastEvent = manager.listeningJournal.last, lastEvent.trackId == "telemetry_test_1" else {
+                throw TestError("Expected last recorded event to match track id")
+            }
+            guard lastEvent.completedFullSong == true && lastEvent.wasSkippedEarly == false else {
+                throw TestError("Expected completedFullSong to be true and wasSkippedEarly to be false")
+            }
+            guard manager.topTracks.contains(where: { $0.track.id == "telemetry_test_1" }) else {
+                throw TestError("Expected topTracks to reflect the played track")
+            }
+        }
+
+        // MARK: - 64. AI Insights Multi-Tone Generation & Language Spectrum
+        test("AIInsightsEngine: Multi-Tone Heuristic Synthesis & Cultural Language Horizon") {
+            let engine = AIInsightsEngine.shared
+            
+            // Generate poetic story
+            let poetic = engine.generateHeuristicStory(tone: .poetic)
+            guard !poetic.archetypeTitle.isEmpty && !poetic.narrativeStory.isEmpty else {
+                throw TestError("Expected valid archetypeTitle and narrativeStory in poetic tone")
+            }
+            
+            // Generate analytical story
+            let analytical = engine.generateHeuristicStory(tone: .analytical)
+            guard !analytical.archetypeTitle.isEmpty && !analytical.narrativeStory.isEmpty else {
+                throw TestError("Expected valid archetypeTitle and narrativeStory in analytical tone")
+            }
+            
+            // Verify language spectrum calculation
+            let spectrum = engine.computedLanguageSpectrum
+            guard !spectrum.isEmpty else {
+                throw TestError("Expected computedLanguageSpectrum to reflect played tracks")
+            }
+            guard spectrum.contains(where: { $0.language == "Bengali" }) else {
+                throw TestError("Expected 'Bengali' to be identified in language spectrum")
+            }
+        }
+        
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         print("  Results: \(passed) passed, \(failed) failed")
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")

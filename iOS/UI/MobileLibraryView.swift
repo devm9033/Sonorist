@@ -7,6 +7,7 @@ public final class MobileLibraryModel: ObservableObject {
     @Published public var showClearAllConfirmation: Bool = false
     @Published public var refreshID: UUID = UUID()
     @Published public var offlineTracks: [Track] = []
+    @Published public var navigateToPlaylists: Bool = false
     
     public init() {
         self.offlineTracks = MediaCacheManager.shared.getAllCachedTracks()
@@ -258,14 +259,10 @@ public struct MobileLibraryView: View {
     }
     
     private var playlistsFolderRow: some View {
-        ZStack {
-            NavigationLink {
-                AICuratedPlaylistsFolderView()
-            } label: {
-                EmptyView()
-            }
-            .opacity(0)
-
+        Button {
+            MobileHaptics.trigger(.light)
+            model.navigateToPlaylists = true
+        } label: {
             HStack(spacing: 14) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -307,6 +304,10 @@ public struct MobileLibraryView: View {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(isLight ? Color.white : Color.platformSecondarySystemBackground)
             )
+        }
+        .buttonStyle(PlainButtonStyle())
+        .navigationDestination(isPresented: $model.navigateToPlaylists) {
+            AICuratedPlaylistsFolderView()
         }
     }
     
