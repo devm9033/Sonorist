@@ -795,31 +795,58 @@ public final class ArtworkImageCache: ObservableObject, @unchecked Sendable {
                 #endif
             }
             
-            // 2. Remote network URL
+            // 2. Remote network URL with maxresdefault -> hqdefault resilience
+            var fetchedData: Data?
+            var effectiveURLs: [URL] = [url]
+            
             do {
                 var req = URLRequest(url: url)
                 req.timeoutInterval = 8
                 let (data, response) = try await session.data(for: req)
-                guard (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
-                
-                #if canImport(UIKit)
-                guard let image = UIImage(data: data) else { return nil }
-                UIGraphicsBeginImageContextWithOptions(image.size, false, image.scale)
-                image.draw(at: .zero)
-                let decoded = UIGraphicsGetImageFromCurrentImageContext() ?? image
-                UIGraphicsEndImageContext()
-                self?.cache.setObject(decoded, forKey: url as NSURL)
-                DispatchQueue.main.async { self?.cacheRevision &+= 1 }
-                return decoded
-                #elseif canImport(AppKit)
-                guard let image = NSImage(data: data) else { return nil }
-                self?.cache.setObject(image, forKey: url as NSURL)
-                DispatchQueue.main.async { self?.cacheRevision &+= 1 }
-                return image
-                #endif
+                if (response as? HTTPURLResponse)?.statusCode == 200 {
+                    fetchedData = data
+                }
             } catch {
-                return nil
+                // Primary network request failed
             }
+            
+            // If primary failed or returned non-200 (e.g. 404 for maxresdefault), fall back to guaranteed hqdefault
+            if fetchedData == nil && url.absoluteString.contains("/maxresdefault.jpg"),
+               let fallbackURL = URL(string: url.absoluteString.replacingOccurrences(of: "/maxresdefault.jpg", with: "/hqdefault.jpg")) {
+                effectiveURLs.append(fallbackURL)
+                do {
+                    var fbReq = URLRequest(url: fallbackURL)
+                    fbReq.timeoutInterval = 8
+                    let (fbData, fbResponse) = try await session.data(for: fbReq)
+                    if (fbResponse as? HTTPURLResponse)?.statusCode == 200 {
+                        fetchedData = fbData
+                    }
+                } catch {
+                    // Fallback request failed
+                }
+            }
+            
+            guard let data = fetchedData else { return nil }
+            
+            #if canImport(UIKit)
+            guard let image = UIImage(data: data) else { return nil }
+            UIGraphicsBeginImageContextWithOptions(image.size, false, image.scale)
+            image.draw(at: .zero)
+            let decoded = UIGraphicsGetImageFromCurrentImageContext() ?? image
+            UIGraphicsEndImageContext()
+            for u in effectiveURLs {
+                self?.cache.setObject(decoded, forKey: u as NSURL)
+            }
+            DispatchQueue.main.async { self?.cacheRevision &+= 1 }
+            return decoded
+            #elseif canImport(AppKit)
+            guard let image = NSImage(data: data) else { return nil }
+            for u in effectiveURLs {
+                self?.cache.setObject(image, forKey: u as NSURL)
+            }
+            DispatchQueue.main.async { self?.cacheRevision &+= 1 }
+            return image
+            #endif
         }
         
         syncQueue.sync {

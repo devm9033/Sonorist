@@ -1,5 +1,14 @@
 import Foundation
 import AVFoundation
+#if canImport(AppKit)
+import AppKit
+#endif
+#if canImport(UIKit)
+import UIKit
+#endif
+#if canImport(MediaPlayer)
+import MediaPlayer
+#endif
 
 @main
 struct SonoristTestsRunner {
@@ -1500,6 +1509,52 @@ struct SonoristTestsRunner {
             guard model.recommendationHeadline.contains("SIMILAR TO") && model.recommendationHeadline.contains("Ami Banglay Gaan Gai") else {
                 throw TestError("Headline should dynamically name the seed track: got \(model.recommendationHeadline)")
             }
+        }
+        
+        test("Now Playing Lock Screen: Synchronous Fast-Path & Local Disk Artwork Resolution") {
+            let engine = AudioPlayerEngine.shared
+            let sampleId = "test_art_disk_456"
+            
+            let tempDir = FileManager.default.temporaryDirectory
+            let artFile = tempDir.appendingPathComponent("\(sampleId).jpg")
+            
+            #if canImport(UIKit)
+            let renderer = UIGraphicsImageRenderer(size: CGSize(width: 120, height: 120))
+            let imgData = renderer.image { ctx in
+                UIColor.blue.setFill()
+                ctx.fill(CGRect(x: 0, y: 0, width: 120, height: 120))
+            }.jpegData(compressionQuality: 0.8)!
+            #elseif canImport(AppKit)
+            guard let rep = NSBitmapImageRep(
+                bitmapDataPlanes: nil,
+                pixelsWide: 100,
+                pixelsHigh: 100,
+                bitsPerSample: 8,
+                samplesPerPixel: 4,
+                hasAlpha: true,
+                isPlanar: false,
+                colorSpaceName: .deviceRGB,
+                bytesPerRow: 0,
+                bitsPerPixel: 0
+            ), let imgData = rep.representation(using: .jpeg, properties: [:]) else {
+                throw TestError("Failed to create test image data on macOS")
+            }
+            #endif
+            
+            try imgData.write(to: artFile)
+            defer { try? FileManager.default.removeItem(at: artFile) }
+            
+            let track = Track(id: sampleId, title: "Lock Screen Local", artist: "Artist", durationSeconds: 200, artworkURL: artFile)
+            engine.currentTrack = track
+            engine.updateNowPlaying(track: track)
+            
+            guard let artwork = engine.currentNowPlayingInfo[MPMediaItemPropertyArtwork] as? MPMediaItemArtwork else {
+                throw TestError("Expected MPMediaItemArtwork to be populated synchronously in currentNowPlayingInfo")
+            }
+            guard artwork.bounds.size.width > 0 else {
+                throw TestError("Expected non-zero artwork bounds")
+            }
+            engine.pause()
         }
         
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")

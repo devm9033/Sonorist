@@ -318,6 +318,7 @@ public final class AudioPlayerEngine: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var playerItemCancellables = Set<AnyCancellable>()
     private var nowPlayingInfo: [String: Any] = [:]
+    public var currentNowPlayingInfo: [String: Any] { nowPlayingInfo }
     private var isRemoteCommandsConfigured: Bool = false
 
     private func removeCurrentTimeObserver() {
@@ -2796,7 +2797,106 @@ public final class AudioPlayerEngine: ObservableObject {
         commandCenter.skipBackwardCommand.isEnabled = false
     }
 
-    private func updateNowPlaying(track: Track) {
+#if os(iOS)
+private final class BackgroundTaskBox: @unchecked Sendable {
+    private var identifier: UIBackgroundTaskIdentifier = .invalid
+    private let lock = NSLock()
+    
+    init(name: String) {
+        identifier = UIApplication.shared.beginBackgroundTask(withName: name) { [weak self] in
+            self?.end()
+        }
+    }
+    
+    func end() {
+        lock.lock()
+        defer { lock.unlock() }
+        if identifier != .invalid {
+            let task = identifier
+            identifier = .invalid
+            DispatchQueue.main.async {
+                UIApplication.shared.endBackgroundTask(task)
+            }
+        }
+    }
+}
+#endif
+
+    private func resolveInitialArtwork(for track: Track) -> MPMediaItemArtwork? {
+        let artworkURL = track.artworkURL
+        let urlKey = artworkURL?.absoluteString as NSString?
+
+        // 1. Check AudioPlayerEngine's own MPMediaItemArtwork cache
+        if let urlKey = urlKey, let cached = Self.artworkCache.object(forKey: urlKey) {
+            return cached
+        }
+
+        // 2. Check ArtworkImageCache.shared in-memory image
+        if let artworkURL = artworkURL, let memImg = ArtworkImageCache.shared.image(for: artworkURL) {
+            let artwork = MPMediaItemArtwork(boundsSize: memImg.size) { _ in memImg }
+            if let urlKey = urlKey {
+                Self.artworkCache.setObject(artwork, forKey: urlKey)
+            }
+            return artwork
+        }
+
+        // If track.artworkURL is maxresdefault, check hqdefault in ArtworkImageCache
+        if let artworkURL = artworkURL, artworkURL.absoluteString.contains("/maxresdefault.jpg"),
+           let hqURL = URL(string: artworkURL.absoluteString.replacingOccurrences(of: "/maxresdefault.jpg", with: "/hqdefault.jpg")),
+           let memImg = ArtworkImageCache.shared.image(for: hqURL) {
+            let artwork = MPMediaItemArtwork(boundsSize: memImg.size) { _ in memImg }
+            if let urlKey = urlKey {
+                Self.artworkCache.setObject(artwork, forKey: urlKey)
+            }
+            return artwork
+        }
+
+        // 3. Check local disk cache (for offline / downloaded tracks)
+        if let localArtURL = MediaCacheManager.shared.cachedArtworkURL(for: track.id) {
+            #if os(iOS)
+            if let uiImg = UIImage(contentsOfFile: localArtURL.path) {
+                let artwork = MPMediaItemArtwork(boundsSize: uiImg.size) { _ in uiImg }
+                if let urlKey = urlKey {
+                    Self.artworkCache.setObject(artwork, forKey: urlKey)
+                }
+                return artwork
+            }
+            #elseif os(macOS)
+            if let nsImg = NSImage(contentsOf: localArtURL) ?? NSImage(contentsOfFile: localArtURL.path) {
+                let artwork = MPMediaItemArtwork(boundsSize: nsImg.size) { _ in nsImg }
+                if let urlKey = urlKey {
+                    Self.artworkCache.setObject(artwork, forKey: urlKey)
+                }
+                return artwork
+            }
+            #endif
+        }
+
+        // 4. If artworkURL is already a local file:// URL
+        if let artworkURL = artworkURL, artworkURL.isFileURL {
+            #if os(iOS)
+            if let uiImg = UIImage(contentsOfFile: artworkURL.path) {
+                let artwork = MPMediaItemArtwork(boundsSize: uiImg.size) { _ in uiImg }
+                if let urlKey = urlKey {
+                    Self.artworkCache.setObject(artwork, forKey: urlKey)
+                }
+                return artwork
+            }
+            #elseif os(macOS)
+            if let nsImg = NSImage(contentsOf: artworkURL) ?? NSImage(contentsOfFile: artworkURL.path) {
+                let artwork = MPMediaItemArtwork(boundsSize: nsImg.size) { _ in nsImg }
+                if let urlKey = urlKey {
+                    Self.artworkCache.setObject(artwork, forKey: urlKey)
+                }
+                return artwork
+            }
+            #endif
+        }
+
+        return nil
+    }
+
+    internal func updateNowPlaying(track: Track) {
         let displayTitle = cleanDisplayTitle(track.title)
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: displayTitle.isEmpty ? track.title : displayTitle,
@@ -2814,8 +2914,14 @@ public final class AudioPlayerEngine: ObservableObject {
         }
 
         #if os(iOS)
-        if let placeholder = Self.placeholderArtwork {
+        if let initialArtwork = resolveInitialArtwork(for: track) {
+            info[MPMediaItemPropertyArtwork] = initialArtwork
+        } else if let placeholder = Self.placeholderArtwork {
             info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: placeholder.size) { _ in placeholder }
+        }
+        #elseif os(macOS)
+        if let initialArtwork = resolveInitialArtwork(for: track) {
+            info[MPMediaItemPropertyArtwork] = initialArtwork
         }
         #endif
 
@@ -2823,9 +2929,7 @@ public final class AudioPlayerEngine: ObservableObject {
         MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : .paused
         MPNowPlayingInfoCenter.default().nowPlayingInfo = self.nowPlayingInfo
 
-        if let artworkURL = track.artworkURL {
-            loadArtworkForNowPlaying(url: artworkURL, trackId: track.id)
-        }
+        loadArtworkForNowPlaying(track: track)
     }
 
     private func updateNowPlayingPlaybackTime() {
@@ -2842,65 +2946,70 @@ public final class AudioPlayerEngine: ObservableObject {
 
     private static let artworkCache: NSCache<NSString, MPMediaItemArtwork> = {
         let cache = NSCache<NSString, MPMediaItemArtwork>()
-        cache.countLimit = 30
+        cache.countLimit = 50
         return cache
     }()
 
-    private func loadArtworkForNowPlaying(url: URL, trackId: String) {
-        let urlKey = url.absoluteString as NSString
-        if let cached = Self.artworkCache.object(forKey: urlKey) {
-            self.nowPlayingInfo[MPMediaItemPropertyArtwork] = cached
-            MPNowPlayingInfoCenter.default().nowPlayingInfo = self.nowPlayingInfo
+    private func loadArtworkForNowPlaying(track: Track) {
+        let trackId = track.id
+        let urlKey = track.artworkURL?.absoluteString as NSString?
+
+        // If already cached in Self.artworkCache, no need to trigger network tasks
+        if let urlKey = urlKey, Self.artworkCache.object(forKey: urlKey) != nil {
             return
         }
 
         #if os(iOS)
-        // If it's a local file URL (e.g. offline downloaded track), load synchronously
-        if url.isFileURL, let uiImage = UIImage(contentsOfFile: url.path) {
-            let artwork = MPMediaItemArtwork(boundsSize: uiImage.size) { _ in uiImage }
-            Self.artworkCache.setObject(artwork, forKey: urlKey)
-            self.nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
-            MPNowPlayingInfoCenter.default().nowPlayingInfo = self.nowPlayingInfo
-            return
-        }
-        #elseif os(macOS)
-        if url.isFileURL, let nsImage = NSImage(contentsOfFile: url.path) {
-            let artwork = MPMediaItemArtwork(boundsSize: nsImage.size) { _ in nsImage }
-            Self.artworkCache.setObject(artwork, forKey: urlKey)
-            self.nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
-            MPNowPlayingInfoCenter.default().nowPlayingInfo = self.nowPlayingInfo
-            return
-        }
+        let bgBox = BackgroundTaskBox(name: "SonoristNowPlayingArtwork")
         #endif
 
-        guard let safeURL = SecurityAudit.validateURL(url.absoluteString) else { return }
-
         Task {
-            do {
-                let (data, _) = try await URLSession.shared.data(from: safeURL)
-                #if os(iOS)
-                if let uiImage = UIImage(data: data) {
-                    await MainActor.run {
-                        guard self.currentTrack?.id == trackId else { return }
-                        let artwork = MPMediaItemArtwork(boundsSize: uiImage.size) { _ in uiImage }
-                        Self.artworkCache.setObject(artwork, forKey: urlKey)
+            #if os(iOS)
+            defer { bgBox.end() }
+            #endif
+
+            // Candidate URLs in priority order
+            var candidates: [URL] = []
+
+            // 1. Check local disk artwork if available
+            if let local = MediaCacheManager.shared.cachedArtworkURL(for: track.id) {
+                candidates.append(local)
+            }
+
+            // 2. Primary track artwork URL
+            if let primary = track.artworkURL {
+                candidates.append(primary)
+                // If maxresdefault, also add explicit hqdefault candidate
+                if primary.absoluteString.contains("/maxresdefault.jpg"),
+                   let hq = URL(string: primary.absoluteString.replacingOccurrences(of: "/maxresdefault.jpg", with: "/hqdefault.jpg")) {
+                    candidates.append(hq)
+                }
+            }
+
+            // 3. Guaranteed YouTube thumbnail candidate
+            if !track.id.isEmpty, let ytFallback = URL(string: "https://i.ytimg.com/vi/\(track.id)/hqdefault.jpg"), !candidates.contains(ytFallback) {
+                candidates.append(ytFallback)
+            }
+
+            for candidate in candidates {
+                // Abort if track changed while fetching
+                let isCurrent: Bool = await MainActor.run { [weak self] in
+                    self?.currentTrack?.id == trackId
+                }
+                guard isCurrent else { return }
+
+                if let image = await ArtworkImageCache.shared.loadImage(for: candidate) {
+                    await MainActor.run { [weak self] in
+                        guard let self = self, self.currentTrack?.id == trackId else { return }
+                        let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+                        if let urlKey = urlKey {
+                            Self.artworkCache.setObject(artwork, forKey: urlKey)
+                        }
                         self.nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
                         MPNowPlayingInfoCenter.default().nowPlayingInfo = self.nowPlayingInfo
                     }
+                    break
                 }
-                #elseif os(macOS)
-                if let nsImage = NSImage(data: data) {
-                    await MainActor.run {
-                        guard self.currentTrack?.id == trackId else { return }
-                        let artwork = MPMediaItemArtwork(boundsSize: nsImage.size) { _ in nsImage }
-                        Self.artworkCache.setObject(artwork, forKey: urlKey)
-                        self.nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
-                        MPNowPlayingInfoCenter.default().nowPlayingInfo = self.nowPlayingInfo
-                    }
-                }
-                #endif
-            } catch {
-                // Ignore transient artwork fetch failures
             }
         }
     }
