@@ -343,15 +343,23 @@ public enum SonoristBackupManager {
         player.saveLikedTracks()
         
         // 5. Restore Analytics
-        analytics.restoreFromBackup(
-            totalSeconds: package.totalSecondsListened,
-            totalSongs: package.totalSongsPlayed,
-            streakDays: package.streakDays,
-            topTracks: package.topTracks,
-            journal: package.listeningJournal,
-            formatDist: package.formatDistribution,
-            timeSlotDist: package.timeSlotDistribution
-        )
+        // Safeguard: Only restore telemetry if package contains real data,
+        // and if it was a legacy audio-bundled package, do not wipe out active device analytics.
+        let isLegacyAudioPackage = package.embeddedAudioBundles != nil && !package.embeddedAudioBundles!.isEmpty
+        let hasTelemetry = package.totalSongsPlayed > 0 || !package.listeningJournal.isEmpty
+        let shouldRestoreAnalytics = hasTelemetry && (!isLegacyAudioPackage || analytics.totalSongsPlayed == 0)
+        
+        if shouldRestoreAnalytics {
+            analytics.restoreFromBackup(
+                totalSeconds: package.totalSecondsListened,
+                totalSongs: package.totalSongsPlayed,
+                streakDays: package.streakDays,
+                topTracks: package.topTracks,
+                journal: package.listeningJournal,
+                formatDist: package.formatDistribution,
+                timeSlotDist: package.timeSlotDistribution
+            )
+        }
         
         // 6. Restore Offline Audio or Manifest
         var audioRestored = 0

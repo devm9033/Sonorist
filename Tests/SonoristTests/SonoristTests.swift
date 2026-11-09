@@ -1748,6 +1748,41 @@ struct SonoristTestsRunner {
             }
         }
         
+        // MARK: - 70. MobileLibraryModel Multi-Select & Selection Toggle
+        test("MobileLibraryModel: Multi-Select, Select All, and Mode Toggling") {
+            let libModel = MobileLibraryModel.shared
+            libModel.exitSelectionMode()
+            
+            let trackA = Track(id: "sel_test_1", title: "Song 1", artist: "Artist", durationSeconds: 120)
+            let trackB = Track(id: "sel_test_2", title: "Song 2", artist: "Artist", durationSeconds: 150)
+            let testTracks = [trackA, trackB]
+            
+            libModel.isSelectionMode = true
+            libModel.toggleTrackSelection(id: trackA.id)
+            guard libModel.selectedTrackIds.contains(trackA.id) else {
+                throw TestError("Expected trackA to be selected")
+            }
+            guard !libModel.selectedTrackIds.contains(trackB.id) else {
+                throw TestError("Expected trackB to remain unselected")
+            }
+            
+            libModel.selectAll(tracks: testTracks)
+            guard libModel.selectedTrackIds.count == 2 else {
+                throw TestError("Expected all 2 tracks to be selected")
+            }
+            
+            libModel.deselectAll()
+            guard libModel.selectedTrackIds.isEmpty else {
+                throw TestError("Expected selectedTrackIds to be empty after deselectAll")
+            }
+            
+            libModel.toggleTrackSelection(id: trackB.id)
+            libModel.exitSelectionMode()
+            guard !libModel.isSelectionMode && libModel.selectedTrackIds.isEmpty else {
+                throw TestError("Expected exitSelectionMode to reset state completely")
+            }
+        }
+        
         // Final cleanup: Never leave test telemetry in user preferences
         ListeningAnalyticsManager.shared.resetAll()
         

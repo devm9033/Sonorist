@@ -11,6 +11,7 @@ public final class MobileSearchModel: ObservableObject {
     @Published public var isLoadingRecommendations: Bool = false
     @Published public var recommendationHeadline: String = "RECOMMENDED FOR YOU"
     @Published public var lastSeedTrackId: String? = nil
+    @Published public var showSettings: Bool = false
     
     public var searchTask: Task<Void, Never>?
     public var recommendTask: Task<Void, Never>?
@@ -190,19 +191,25 @@ public struct MobileSearchView: View {
                 )
             }
         }
+        .sheet(isPresented: $model.showSettings) {
+            MobileSettingsView(isPresentedAsSheet: true)
+                .preferredColorScheme(themeManager.currentTheme.colorScheme)
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(28)
+        }
     }
     
     // MARK: - Subviews
     
     private var searchHeader: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
+            HStack(alignment: .center, spacing: 8) {
                 Text("Search")
                     .font(.system(size: 28, weight: .bold, design: .rounded))
                 
                 Spacer()
                 
-                // Theme Appearance Switcher (System, Light, Dark)
+                // Theme Appearance Switcher Menu
                 Menu {
                     ForEach(AppThemeMode.allCases) { mode in
                         Button {
@@ -212,18 +219,27 @@ public struct MobileSearchView: View {
                         }
                     }
                 } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: themeManager.currentTheme.icon)
-                            .font(.system(size: 13, weight: .semibold))
-                        Text(themeManager.currentTheme.displayName)
-                            .font(.system(size: 12, weight: .semibold))
-                    }
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.primary.opacity(0.06))
-                    .clipShape(Capsule())
+                    Image(systemName: themeManager.currentTheme.icon)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .frame(width: 32, height: 32)
+                        .background(Color.primary.opacity(0.06))
+                        .clipShape(Circle())
                 }
+                
+                // Settings Button
+                Button {
+                    MobileHaptics.trigger(.selection)
+                    model.showSettings = true
+                } label: {
+                    Image(systemName: "gearshape.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .frame(width: 32, height: 32)
+                        .background(Color.primary.opacity(0.06))
+                        .clipShape(Circle())
+                }
+                .buttonStyle(PlainButtonStyle())
             }
             
             HStack(spacing: 8) {

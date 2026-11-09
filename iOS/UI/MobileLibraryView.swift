@@ -9,6 +9,11 @@ public final class MobileLibraryModel: ObservableObject {
     @Published public var offlineTracks: [Track] = []
     @Published public var navigateToPlaylists: Bool = false
     
+    // Batch Selection Mode
+    @Published public var isSelectionMode: Bool = false
+    @Published public var selectedTrackIds: Set<String> = []
+    @Published public var showBatchDeleteConfirmation: Bool = false
+    
     public init() {
         self.offlineTracks = MediaCacheManager.shared.getAllCachedTracks()
         loadOfflineTracks()
@@ -21,6 +26,27 @@ public final class MobileLibraryModel: ObservableObject {
                 self.offlineTracks = tracks
             }
         }
+    }
+    
+    public func toggleTrackSelection(id: String) {
+        if selectedTrackIds.contains(id) {
+            selectedTrackIds.remove(id)
+        } else {
+            selectedTrackIds.insert(id)
+        }
+    }
+    
+    public func selectAll(tracks: [Track]) {
+        selectedTrackIds = Set(tracks.map { $0.id })
+    }
+    
+    public func deselectAll() {
+        selectedTrackIds.removeAll()
+    }
+    
+    public func exitSelectionMode() {
+        isSelectionMode = false
+        selectedTrackIds.removeAll()
     }
 }
 
@@ -35,6 +61,7 @@ public enum MobileLibrarySegment: String, CaseIterable, Identifiable {
 public struct MobileLibraryView: View {
     @ObservedObject private var player = AudioPlayerEngine.shared
     @ObservedObject private var model = MobileLibraryModel.shared
+    @ObservedObject private var themeManager = AppThemeManager.shared
     @Environment(\.colorScheme) private var colorScheme
     
     private var isLight: Bool { colorScheme == .light }
@@ -43,75 +70,72 @@ public struct MobileLibraryView: View {
     
     public var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                // Header (Pinned comfortably below Dynamic Island / status bar, identical to Page 1 & Page 3)
-                HStack(alignment: .center) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Library")
-                            .font(.system(size: 28, weight: .bold, design: .rounded))
-                        
-                        Text("Offline downloads & favorites")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(.secondary)
-                    }
-                    
-                    Spacer()
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 10)
-                .padding(.bottom, 8)
+            ZStack(alignment: .bottom) {
+                VStack(spacing: 0) {
+                    // Header (Pinned comfortably below Dynamic Island / status bar, identical to Search & Insights)
+                    headerSection
+                        .padding(.horizontal, 16)
+                        .padding(.top, 10)
+                        .padding(.bottom, 8)
 
-                // Segment Selector (Downloaded / Favorites) & Storage Badge
-                segmentSelectorSection
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 6)
+                    // Segment Selector (Downloaded / Favorites) & Storage Badge
+                    segmentSelectorSection
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 6)
 
-                // Content List
-                List {
-                    // Playlists Folder Row (When on Downloaded segment)
-                    if model.selectedSegment == .downloaded {
-                        playlistsFolderRow
-                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
-                            .listRowSeparator(.hidden)
-                            .listRowBackground(Color.clear)
-                    }
-
-                    // Tracks or Empty State
-                    let tracks = currentTracks
-                    if tracks.isEmpty {
-                        emptyStateView
-                            .listRowInsets(EdgeInsets())
-                            .listRowSeparator(.hidden)
-                            .listRowBackground(Color.clear)
-                    } else {
-                        ForEach(tracks, id: \.id) { track in
-                            libraryTrackRow(for: track)
-                                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                    // Content List
+                    List {
+                        // Playlists Folder Row (When on Downloaded segment and not in selection mode)
+                        if model.selectedSegment == .downloaded && !model.isSelectionMode {
+                            playlistsFolderRow
+                                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
                                 .listRowSeparator(.hidden)
                                 .listRowBackground(Color.clear)
-                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                    if model.selectedSegment == .downloaded || MediaCacheManager.shared.isCached(videoId: track.id) {
-                                        Button(role: .destructive) {
-                                            player.removeDownloadedTrack(track: track)
-                                        } label: {
-                                            Label("Remove", systemImage: "trash")
+                        }
+
+                        // Tracks or Empty State
+                        let tracks = currentTracks
+                        if tracks.isEmpty {
+                            emptyStateView
+                                .listRowInsets(EdgeInsets())
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
+                        } else {
+                            ForEach(tracks, id: \.id) { track in
+                                libraryTrackRow(for: track)
+                                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                                    .listRowSeparator(.hidden)
+                                    .listRowBackground(Color.clear)
+                                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                        if !model.isSelectionMode && (model.selectedSegment == .downloaded || MediaCacheManager.shared.isCached(videoId: track.id)) {
+                                            Button(role: .destructive) {
+                                                player.removeDownloadedTrack(track: track)
+                                                model.loadOfflineTracks()
+                                            } label: {
+                                                Label("Remove", systemImage: "trash")
+                                            }
                                         }
                                     }
-                                }
+                            }
                         }
                     }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    .safeAreaInset(edge: .bottom) {
+                        Color.clear.frame(height: model.isSelectionMode ? 220 : 180)
+                    }
+                    .refreshable {
+                        MobileHaptics.trigger(.medium)
+                        model.loadOfflineTracks()
+                        await AIPlaylistEngine.shared.reconcileWithCachedTracks()
+                    }
+                    .id(model.refreshID)
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .safeAreaInset(edge: .bottom) {
-                    Color.clear.frame(height: 180)
+
+                // Floating Batch Selection Toolbar (visible when selecting songs)
+                if model.isSelectionMode {
+                    batchSelectionToolbar
                 }
-                .refreshable {
-                    MobileHaptics.trigger(.medium)
-                    model.loadOfflineTracks()
-                    await AIPlaylistEngine.shared.reconcileWithCachedTracks()
-                }
-                .id(model.refreshID)
             }
             .navigationTitle("Library")
             #if os(iOS)
@@ -124,9 +148,18 @@ public struct MobileLibraryView: View {
             model.loadOfflineTracks()
             AIPlaylistEngine.shared.reconcileWithCachedTracks()
         }
+        .onDisappear {
+            model.exitSelectionMode()
+        }
         .onReceive(NotificationCenter.default.publisher(for: AudioPlayerEngine.trackDidCacheNotification)) { _ in
             model.loadOfflineTracks()
             model.refreshID = UUID()
+        }
+        .sheet(isPresented: $model.showSettings) {
+            MobileSettingsView(isPresentedAsSheet: true)
+                .preferredColorScheme(themeManager.currentTheme.colorScheme)
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(28)
         }
         .confirmationDialog(
             "Remove All Downloads?",
@@ -143,6 +176,128 @@ public struct MobileLibraryView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This will permanently delete all \(model.offlineTracks.count) downloaded songs and free \(MediaCacheManager.shared.getFormattedCacheSize()) of storage on your iPhone.")
+        }
+        .confirmationDialog(
+            batchDeleteTitle,
+            isPresented: $model.showBatchDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(batchDeleteConfirmLabel, role: .destructive) {
+                deleteSelectedTracks()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(batchDeleteMessage)
+        }
+    }
+
+    // MARK: - Header (Clean, Pinned, Theme Switcher & Settings)
+
+    private var headerSection: some View {
+        HStack(alignment: .center, spacing: 8) {
+            if model.isSelectionMode {
+                // Done button to exit selection mode
+                Button {
+                    MobileHaptics.trigger(.light)
+                    withAnimation(FluidTheme.fluidSpring) {
+                        model.exitSelectionMode()
+                    }
+                } label: {
+                    Text("Done")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(FluidTheme.musicRed)
+                }
+
+                Spacer()
+
+                Text("\(model.selectedTrackIds.count) Selected")
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .foregroundColor(.primary)
+
+                Spacer()
+
+                let allSelected = !currentTracks.isEmpty && model.selectedTrackIds.count == currentTracks.count
+                Button {
+                    MobileHaptics.trigger(.selection)
+                    withAnimation(FluidTheme.fluidSpring) {
+                        if allSelected {
+                            model.deselectAll()
+                        } else {
+                            model.selectAll(tracks: currentTracks)
+                        }
+                    }
+                } label: {
+                    Text(allSelected ? "Deselect All" : "Select All")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(FluidTheme.musicRed)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Library")
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                    
+                    Text("Offline downloads & favorites")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.secondary)
+                }
+                
+                Spacer()
+
+                // Multi-select Trigger Button
+                if !currentTracks.isEmpty {
+                    Button {
+                        MobileHaptics.trigger(.selection)
+                        withAnimation(FluidTheme.fluidSpring) {
+                            model.isSelectionMode = true
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.circle")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("Select")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .foregroundColor(FluidTheme.musicRed)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(FluidTheme.musicRed.opacity(0.1))
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+                
+                // Theme Appearance Switcher Menu
+                Menu {
+                    ForEach(AppThemeMode.allCases) { mode in
+                        Button {
+                            themeManager.setTheme(mode)
+                        } label: {
+                            Label(mode.displayName, systemImage: mode.icon)
+                        }
+                    }
+                } label: {
+                    Image(systemName: themeManager.currentTheme.icon)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .frame(width: 32, height: 32)
+                        .background(Color.primary.opacity(0.06))
+                        .clipShape(Circle())
+                }
+
+                // Settings Button
+                Button {
+                    MobileHaptics.trigger(.selection)
+                    model.showSettings = true
+                } label: {
+                    Image(systemName: "gearshape.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .frame(width: 32, height: 32)
+                        .background(Color.primary.opacity(0.06))
+                        .clipShape(Circle())
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
         }
     }
 
@@ -177,6 +332,7 @@ public struct MobileLibraryView: View {
                         MobileHaptics.trigger(.selection)
                         withAnimation(FluidTheme.fluidSpring) {
                             model.selectedSegment = seg
+                            model.exitSelectionMode()
                         }
                     } label: {
                         Text(seg.rawValue)
@@ -194,34 +350,36 @@ public struct MobileLibraryView: View {
                 
                 Spacer()
                 
-                // Shuffle Play All Button
-                Button {
-                    MobileHaptics.trigger(.medium)
-                    let tracks = currentTracks
-                    if let first = tracks.shuffled().first {
-                        MobileNavigationCoordinator.shared.revealMiniPlayer()
-                        if model.selectedSegment == .downloaded {
-                            player.playFromOfflineLibrary(tracks: tracks.shuffled(), selectedTrack: first)
-                        } else {
-                            player.playFromPlaylist(tracks: tracks.shuffled(), selectedTrack: first)
+                if !model.isSelectionMode {
+                    // Shuffle Play All Button
+                    Button {
+                        MobileHaptics.trigger(.medium)
+                        let tracks = currentTracks
+                        if let first = tracks.shuffled().first {
+                            MobileNavigationCoordinator.shared.revealMiniPlayer()
+                            if model.selectedSegment == .downloaded {
+                                player.playFromOfflineLibrary(tracks: tracks.shuffled(), selectedTrack: first)
+                            } else {
+                                player.playFromPlaylist(tracks: tracks.shuffled(), selectedTrack: first)
+                            }
                         }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "shuffle")
+                                .font(.system(size: 13, weight: .bold))
+                            Text("Shuffle")
+                                .font(.system(size: 12, weight: .bold))
+                        }
+                        .foregroundColor(FluidTheme.musicRed)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
                     }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "shuffle")
-                            .font(.system(size: 13, weight: .bold))
-                        Text("Shuffle")
-                            .font(.system(size: 12, weight: .bold))
-                    }
-                    .foregroundColor(FluidTheme.musicRed)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
+                    .buttonStyle(PlainButtonStyle())
                 }
-                .buttonStyle(PlainButtonStyle())
             }
             
             // Storage and song count badge for offline library
-            if model.selectedSegment == .downloaded && !model.offlineTracks.isEmpty {
+            if model.selectedSegment == .downloaded && !model.offlineTracks.isEmpty && !model.isSelectionMode {
                 HStack(spacing: 8) {
                     Image(systemName: "arrow.down.circle.fill")
                         .font(.system(size: 11, weight: .semibold))
@@ -323,16 +481,40 @@ public struct MobileLibraryView: View {
     private func libraryTrackRow(for track: Track) -> some View {
         let isCurrent = player.currentTrack?.id == track.id
         let isCached = model.selectedSegment == .downloaded || MediaCacheManager.shared.isCached(videoId: track.id)
+        let isSelected = model.selectedTrackIds.contains(track.id)
         
         return HStack(spacing: 12) {
-            // Main clickable playback area
+            // Checkbox when in multi-selection mode
+            if model.isSelectionMode {
+                Button {
+                    MobileHaptics.trigger(.selection)
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        model.toggleTrackSelection(id: track.id)
+                    }
+                } label: {
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundColor(isSelected ? FluidTheme.musicRed : .secondary.opacity(0.4))
+                }
+                .buttonStyle(PlainButtonStyle())
+                .transition(.scale.combined(with: .opacity))
+            }
+
+            // Main clickable playback / selection area
             Button {
-                MobileHaptics.trigger(.medium)
-                MobileNavigationCoordinator.shared.revealMiniPlayer()
-                if model.selectedSegment == .downloaded {
-                    player.playFromOfflineLibrary(tracks: currentTracks, selectedTrack: track)
+                if model.isSelectionMode {
+                    MobileHaptics.trigger(.selection)
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        model.toggleTrackSelection(id: track.id)
+                    }
                 } else {
-                    player.playFromPlaylist(tracks: currentTracks, selectedTrack: track)
+                    MobileHaptics.trigger(.medium)
+                    MobileNavigationCoordinator.shared.revealMiniPlayer()
+                    if model.selectedSegment == .downloaded {
+                        player.playFromOfflineLibrary(tracks: currentTracks, selectedTrack: track)
+                    } else {
+                        player.playFromPlaylist(tracks: currentTracks, selectedTrack: track)
+                    }
                 }
             } label: {
                 HStack(spacing: 12) {
@@ -401,79 +583,216 @@ public struct MobileLibraryView: View {
             }
             .buttonStyle(PlainButtonStyle())
             
-            // Isolated ellipsis menu (prevents conflicting gesture recognition)
-            Menu {
-                Button {
-                    if model.selectedSegment == .downloaded {
-                        player.playFromOfflineLibrary(tracks: currentTracks, selectedTrack: track)
-                    } else {
-                        player.playFromPlaylist(tracks: currentTracks, selectedTrack: track)
-                    }
-                } label: {
-                    Label("Play Now", systemImage: "play.circle")
-                }
-                
-                Button {
-                    player.playNext(track: track)
-                    MobileToastManager.shared.show(message: "Playing Next", icon: "arrow.up.and.down.and.sparkles")
-                } label: {
-                    Label("Play Next", systemImage: "text.insert")
-                }
-                
-                Button {
-                    player.addToQueue(track: track)
-                    MobileToastManager.shared.show(message: "Added to Queue", icon: "text.badge.plus")
-                } label: {
-                    Label("Add to Queue", systemImage: "text.badge.plus")
-                }
-                
-                // Per-song download removal or addition
-                if isCached {
-                    Button(role: .destructive) {
-                        player.removeDownloadedTrack(track: track)
-                    } label: {
-                        Label("Remove Download", systemImage: "trash")
-                    }
-                } else if player.downloadingTrackIDs.contains(track.id) {
-                    let progress = player.downloadProgress[track.id] ?? 0.05
-                    Button {} label: {
-                        Label("Downloading (\(Int(progress * 100))%)...", systemImage: "arrow.down.circle")
-                    }
-                    .disabled(true)
-                } else {
+            // Isolated ellipsis menu (only shown when NOT in selection mode)
+            if !model.isSelectionMode {
+                Menu {
                     Button {
-                        player.downloadTrack(track: track)
+                        if model.selectedSegment == .downloaded {
+                            player.playFromOfflineLibrary(tracks: currentTracks, selectedTrack: track)
+                        } else {
+                            player.playFromPlaylist(tracks: currentTracks, selectedTrack: track)
+                        }
                     } label: {
-                        Label("Download Offline", systemImage: "arrow.down.circle")
+                        Label("Play Now", systemImage: "play.circle")
                     }
-                }
-                
-                Button {
-                    let wasLiked = player.isLiked(track: track)
-                    player.toggleLike(track: track)
-                    MobileToastManager.shared.show(
-                        message: wasLiked ? "Removed from Favorites" : "Added to Favorites",
-                        icon: wasLiked ? "heart.slash" : "heart.fill"
-                    )
+                    
+                    Button {
+                        player.playNext(track: track)
+                        MobileToastManager.shared.show(message: "Playing Next", icon: "arrow.up.and.down.and.sparkles")
+                    } label: {
+                        Label("Play Next", systemImage: "text.insert")
+                    }
+                    
+                    Button {
+                        player.addToQueue(track: track)
+                        MobileToastManager.shared.show(message: "Added to Queue", icon: "text.badge.plus")
+                    } label: {
+                        Label("Add to Queue", systemImage: "text.badge.plus")
+                    }
+                    
+                    // Per-song download removal or addition
+                    if isCached {
+                        Button(role: .destructive) {
+                            player.removeDownloadedTrack(track: track)
+                            model.loadOfflineTracks()
+                        } label: {
+                            Label("Remove Download", systemImage: "trash")
+                        }
+                    } else if player.downloadingTrackIDs.contains(track.id) {
+                        let progress = player.downloadProgress[track.id] ?? 0.05
+                        Button {} label: {
+                            Label("Downloading (\(Int(progress * 100))%)...", systemImage: "arrow.down.circle")
+                        }
+                        .disabled(true)
+                    } else {
+                        Button {
+                            player.downloadTrack(track: track)
+                        } label: {
+                            Label("Download Offline", systemImage: "arrow.down.circle")
+                        }
+                    }
+                    
+                    Button {
+                        let wasLiked = player.isLiked(track: track)
+                        player.toggleLike(track: track)
+                        MobileToastManager.shared.show(
+                            message: wasLiked ? "Removed from Favorites" : "Added to Favorites",
+                            icon: wasLiked ? "heart.slash" : "heart.fill"
+                        )
+                    } label: {
+                        Label(player.isLiked(track: track) ? "Favorited" : "Favorite",
+                              systemImage: player.isLiked(track: track) ? "heart.fill" : "heart")
+                    }
                 } label: {
-                    Label(player.isLiked(track: track) ? "Favorited" : "Favorite",
-                          systemImage: player.isLiked(track: track) ? "heart.fill" : "heart")
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(.secondary)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(.secondary)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
+                .buttonStyle(PlainButtonStyle())
             }
-            .buttonStyle(PlainButtonStyle())
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(isCurrent ? FluidTheme.musicRed.opacity(0.08) : Color.clear)
+                .fill(isSelected ? FluidTheme.musicRed.opacity(0.12) : (isCurrent ? FluidTheme.musicRed.opacity(0.08) : Color.clear))
         )
+        // Long press anywhere on the song row triggers selection mode and checks this song
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.35).onEnded { _ in
+                if !model.isSelectionMode {
+                    MobileHaptics.trigger(.heavy)
+                    withAnimation(FluidTheme.fluidSpring) {
+                        model.isSelectionMode = true
+                        model.selectedTrackIds = [track.id]
+                    }
+                }
+            }
+        )
+    }
+
+    // MARK: - Floating Batch Selection Toolbar
+
+    private var batchSelectionToolbar: some View {
+        HStack(spacing: 14) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(model.selectedTrackIds.count) of \(currentTracks.count) selected")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(.primary)
+                
+                if model.selectedSegment == .downloaded {
+                    let totalBytes = calculateSelectedTracksSize(ids: model.selectedTrackIds)
+                    Text(ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file) + " to free up")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.secondary)
+                } else {
+                    Text(model.selectedSegment.rawValue)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            Spacer()
+            
+            // Delete Selected Button
+            Button {
+                MobileHaptics.trigger(.medium)
+                model.showBatchDeleteConfirmation = true
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "trash.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text(model.selectedTrackIds.count == currentTracks.count && !currentTracks.isEmpty ? "Delete All" : "Delete (\(model.selectedTrackIds.count))")
+                        .font(.system(size: 13, weight: .bold))
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(
+                    Capsule()
+                        .fill(model.selectedTrackIds.isEmpty ? Color.gray.opacity(0.4) : FluidTheme.musicRed)
+                )
+            }
+            .buttonStyle(PlainButtonStyle())
+            .disabled(model.selectedTrackIds.isEmpty)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
+        )
+        .padding(.horizontal, 16)
+        .padding(.bottom, 96) // Floats comfortably above bottom tab bar dock
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
+    // MARK: - Batch Deletion Logic
+
+    private func deleteSelectedTracks() {
+        let idsToDelete = model.selectedTrackIds
+        guard !idsToDelete.isEmpty else { return }
+        let tracksToDelete = currentTracks.filter { idsToDelete.contains($0.id) }
+        let count = tracksToDelete.count
+        
+        MobileHaptics.trigger(.heavy)
+        
+        if model.selectedSegment == .downloaded {
+            for track in tracksToDelete {
+                player.removeDownloadedTrack(track: track)
+            }
+            model.loadOfflineTracks()
+            Task {
+                await AIPlaylistEngine.shared.reconcileWithCachedTracks()
+            }
+        } else {
+            player.likedTracks.removeAll { idsToDelete.contains($0.id) }
+            player.saveLikedTracks()
+        }
+        
+        model.exitSelectionMode()
+        model.refreshID = UUID()
+        MobileToastManager.shared.show(
+            message: "Removed \(count) \(count == 1 ? "song" : "songs")",
+            icon: "trash"
+        )
+    }
+
+    private func calculateSelectedTracksSize(ids: Set<String>) -> Int64 {
+        let cache = MediaCacheManager.shared
+        var total: Int64 = 0
+        for id in ids {
+            let file = cache.libraryDirectory.appendingPathComponent("\(id).sonorist")
+            if let attrs = try? FileManager.default.attributesOfItem(atPath: file.path),
+               let size = attrs[.size] as? Int64 {
+                total += size
+            }
+        }
+        return total
+    }
+
+    private var batchDeleteTitle: String {
+        let count = model.selectedTrackIds.count
+        let type = model.selectedSegment == .downloaded ? "Downloads" : "Favorites"
+        return count == currentTracks.count && !currentTracks.isEmpty ? "Delete All \(type)?" : "Delete \(count) \(type)?"
+    }
+
+    private var batchDeleteConfirmLabel: String {
+        let count = model.selectedTrackIds.count
+        return count == currentTracks.count && !currentTracks.isEmpty ? "Delete All (\(count) Songs)" : "Delete \(count) \(count == 1 ? "Song" : "Songs")"
+    }
+
+    private var batchDeleteMessage: String {
+        let count = model.selectedTrackIds.count
+        if model.selectedSegment == .downloaded {
+            let size = ByteCountFormatter.string(fromByteCount: calculateSelectedTracksSize(ids: model.selectedTrackIds), countStyle: .file)
+            return "This will permanently remove the \(count) selected \(count == 1 ? "song" : "songs") from offline storage and free up \(size) on your iPhone."
+        } else {
+            return "This will remove the \(count) selected \(count == 1 ? "song" : "songs") from your Favorites list."
+        }
     }
     
     private func formatDuration(_ seconds: Double) -> String {
