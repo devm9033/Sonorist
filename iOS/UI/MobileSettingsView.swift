@@ -167,10 +167,23 @@ public final class MobileSettingsModel: ObservableObject {
                     self.backupStatusMessage = "Completed"
                     self.backupIsCompleted = true
                     self.backupResultTitle = "Restore Completed!"
-                    if summary.audioRestoredCount > 0 && summary.playlistCount == 0 {
-                        self.backupResultMessage = "Successfully restored \(summary.audioRestoredCount) \(summary.audioRestoredCount == 1 ? "song" : "songs") to your offline library."
-                    } else if summary.audioRestoredCount > 0 {
-                        self.backupResultMessage = "Successfully restored \(summary.audioRestoredCount) offline songs and \(summary.playlistCount) playlists."
+                    let totalSongs = summary.audioRestoredCount + summary.audioAlreadyPresentCount
+                    if totalSongs > 0 && summary.playlistCount == 0 {
+                        if summary.audioRestoredCount > 0 && summary.audioAlreadyPresentCount > 0 {
+                            self.backupResultMessage = "Out of \(totalSongs) songs, \(summary.audioRestoredCount) restored and \(summary.audioAlreadyPresentCount) already present in your library."
+                        } else if summary.audioRestoredCount == 0 && summary.audioAlreadyPresentCount > 0 {
+                            self.backupResultMessage = "All \(summary.audioAlreadyPresentCount) \(summary.audioAlreadyPresentCount == 1 ? "song was" : "songs were") already present in your library. Nothing was overwritten."
+                        } else {
+                            self.backupResultMessage = "Successfully restored \(summary.audioRestoredCount) \(summary.audioRestoredCount == 1 ? "song" : "songs") to your offline library."
+                        }
+                    } else if totalSongs > 0 {
+                        if summary.audioAlreadyPresentCount > 0 && summary.audioRestoredCount > 0 {
+                            self.backupResultMessage = "Restored \(summary.playlistCount) playlists. Out of \(totalSongs) songs, \(summary.audioRestoredCount) restored and \(summary.audioAlreadyPresentCount) already present."
+                        } else if summary.audioRestoredCount == 0 && summary.audioAlreadyPresentCount > 0 {
+                            self.backupResultMessage = "Restored \(summary.playlistCount) playlists. All \(summary.audioAlreadyPresentCount) songs were already present."
+                        } else {
+                            self.backupResultMessage = "Successfully restored \(summary.audioRestoredCount) offline songs and \(summary.playlistCount) playlists."
+                        }
                     } else {
                         self.backupResultMessage = "Successfully restored \(summary.playlistCount) playlists, favorites, and preferences."
                     }

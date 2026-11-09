@@ -1716,6 +1716,15 @@ struct SonoristTestsRunner {
             guard FileManager.default.fileExists(atPath: fileURL.path) else {
                 throw TestError("Expected song file to be restored on disk")
             }
+            
+            // Re-importing while song is already present must NOT overwrite and report alreadyPresentCount
+            let secondSummary = try await SonoristBackupManager.importBackup(from: exportURL)
+            guard secondSummary.audioRestoredCount == 0 else {
+                throw TestError("Expected audioRestoredCount == 0 on second import, got \(secondSummary.audioRestoredCount)")
+            }
+            guard secondSummary.audioAlreadyPresentCount == 1 else {
+                throw TestError("Expected audioAlreadyPresentCount == 1 on second import, got \(secondSummary.audioAlreadyPresentCount)")
+            }
         }
 
         // MARK: - 69. ListeningAnalyticsManager Zero Fake Metrics

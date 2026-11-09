@@ -7,6 +7,7 @@ public struct BackupRestoreSummary: Sendable {
     public let favoriteCount: Int
     public let totalSongsPlayed: Int
     public let audioRestoredCount: Int
+    public let audioAlreadyPresentCount: Int
     public let offlineSongsNeedDownload: [Track]
     public let hasApiKey: Bool
     
@@ -15,6 +16,7 @@ public struct BackupRestoreSummary: Sendable {
         favoriteCount: Int,
         totalSongsPlayed: Int,
         audioRestoredCount: Int,
+        audioAlreadyPresentCount: Int = 0,
         offlineSongsNeedDownload: [Track] = [],
         hasApiKey: Bool
     ) {
@@ -22,6 +24,7 @@ public struct BackupRestoreSummary: Sendable {
         self.favoriteCount = favoriteCount
         self.totalSongsPlayed = totalSongsPlayed
         self.audioRestoredCount = audioRestoredCount
+        self.audioAlreadyPresentCount = audioAlreadyPresentCount
         self.offlineSongsNeedDownload = offlineSongsNeedDownload
         self.hasApiKey = hasApiKey
     }
@@ -330,10 +333,14 @@ public enum SonoristBackupManager {
         currentOffset += 4
         
         let cache = MediaCacheManager.shared
+        let existingTracks = cache.getAllCachedTracks()
+        let existingMap = Dictionary(existingTracks.map { ($0.id, $0.title) }, uniquingKeysWith: { first, _ in first })
+        
         var restoredCount = 0
+        var alreadyPresentCount = 0
         let totalCount = Int(count)
         
-        for _ in 0..<count {
+        for index in 0..<totalCount {
             guard currentOffset + 2 <= data.count else { break }
             let idLen: UInt16 = data.subdata(in: currentOffset..<(currentOffset + 2)).withUnsafeBytes { $0.load(as: UInt16.self) }.littleEndian
             currentOffset += 2
@@ -352,24 +359,55 @@ public enum SonoristBackupManager {
             currentOffset += Int(dataLen)
             
             let targetURL = cache.libraryDirectory.appendingPathComponent("\(trackId).sonorist")
-            try? bundleData.write(to: targetURL, options: .atomic)
-            restoredCount += 1
+            let isAlreadyCached = cache.isCached(videoId: trackId) || FileManager.default.fileExists(atPath: targetURL.path)
             
-            let progress = Double(restoredCount) / Double(max(1, totalCount))
-            progressHandler?(0.05 + progress * 0.90, "Restoring track \(restoredCount) of \(totalCount)...", restoredCount, totalCount)
+            let trackTitle: String
+            if let meta = try? SonoristBundleEngine.readMetadataOnly(from: bundleData) {
+                trackTitle = meta.track.title
+            } else if let title = existingMap[trackId] {
+                trackTitle = title
+            } else {
+                trackTitle = "Song \(index + 1)"
+            }
+            
+            let progress = Double(index + 1) / Double(max(1, totalCount))
+            
+            if isAlreadyCached {
+                // Song already exists in offline library - DO NOT overwrite
+                alreadyPresentCount += 1
+                progressHandler?(0.05 + progress * 0.90, "Already present: \(trackTitle)", index + 1, totalCount)
+            } else {
+                // Restore new song
+                try? bundleData.write(to: targetURL, options: .atomic)
+                restoredCount += 1
+                progressHandler?(0.05 + progress * 0.90, "Restoring: \(trackTitle)", index + 1, totalCount)
+            }
             
             // Pacing sleep (20ms) so the restore loading bar visibly moves
             try? await Task.sleep(nanoseconds: 20_000_000)
         }
         
-        progressHandler?(0.98, "Updating offline library manifest...", restoredCount, totalCount)
-        cache.reloadManifest()
-        progressHandler?(1.0, "Restored all \(restoredCount) songs!", restoredCount, totalCount)
+        progressHandler?(0.98, "Updating offline library manifest...", totalCount, totalCount)
+        if restoredCount > 0 {
+            cache.reloadManifest()
+        }
+        
+        let completionMsg: String
+        if alreadyPresentCount > 0 && restoredCount > 0 {
+            completionMsg = "Out of \(totalCount) songs, \(restoredCount) restored and \(alreadyPresentCount) already present."
+        } else if restoredCount == 0 && alreadyPresentCount > 0 {
+            completionMsg = "All \(alreadyPresentCount) songs already present in your library."
+        } else {
+            completionMsg = "Restored all \(restoredCount) songs!"
+        }
+        progressHandler?(1.0, completionMsg, totalCount, totalCount)
+        
         return BackupRestoreSummary(
             playlistCount: 0,
             favoriteCount: 0,
             totalSongsPlayed: 0,
             audioRestoredCount: restoredCount,
+            audioAlreadyPresentCount: alreadyPresentCount,
             offlineSongsNeedDownload: [],
             hasApiKey: false
         )
@@ -438,23 +476,35 @@ public enum SonoristBackupManager {
         
         // 6. Restore Offline Audio or Manifest
         var audioRestored = 0
+        var audioAlreadyPresent = 0
         var needsDownload: [Track] = []
         
         if let bundles = package.embeddedAudioBundles, !bundles.isEmpty {
             let totalBundles = bundles.count
             for (index, (trackId, bundleData)) in bundles.enumerated() {
                 let targetURL = cache.libraryDirectory.appendingPathComponent("\(trackId).sonorist")
-                try? bundleData.write(to: targetURL, options: .atomic)
-                audioRestored += 1
+                let isAlreadyCached = cache.isCached(videoId: trackId) || FileManager.default.fileExists(atPath: targetURL.path)
                 let progress = Double(index + 1) / Double(totalBundles)
-                progressHandler?(0.7 + progress * 0.28, "Restoring legacy audio \(index + 1) of \(totalBundles)...", index + 1, totalBundles)
+                
+                if isAlreadyCached {
+                    audioAlreadyPresent += 1
+                    progressHandler?(0.7 + progress * 0.28, "Already present: Song \(index + 1)", index + 1, totalBundles)
+                } else {
+                    try? bundleData.write(to: targetURL, options: .atomic)
+                    audioRestored += 1
+                    progressHandler?(0.7 + progress * 0.28, "Restoring legacy audio \(index + 1) of \(totalBundles)...", index + 1, totalBundles)
+                }
                 try? await Task.sleep(nanoseconds: 20_000_000)
             }
-            cache.reloadManifest()
+            if audioRestored > 0 {
+                cache.reloadManifest()
+            }
         } else {
             for track in package.offlineManifest {
                 if !cache.isCached(videoId: track.id) {
                     needsDownload.append(track)
+                } else {
+                    audioAlreadyPresent += 1
                 }
             }
         }
@@ -465,6 +515,7 @@ public enum SonoristBackupManager {
             favoriteCount: package.likedTracks.count,
             totalSongsPlayed: package.totalSongsPlayed,
             audioRestoredCount: audioRestored,
+            audioAlreadyPresentCount: audioAlreadyPresent,
             offlineSongsNeedDownload: needsDownload,
             hasApiKey: !package.aiApiKey.isEmpty
         )
