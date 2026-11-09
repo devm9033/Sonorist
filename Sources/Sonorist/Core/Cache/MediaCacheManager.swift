@@ -827,6 +827,8 @@ public final class ArtworkImageCache: ObservableObject, @unchecked Sendable {
     
     public func clear() {
         cache.removeAllObjects()
+        session.configuration.urlCache?.removeAllCachedResponses()
+        URLCache.shared.removeAllCachedResponses()
         DispatchQueue.main.async {
             self.cacheRevision &+= 1
         }

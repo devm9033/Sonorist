@@ -523,7 +523,7 @@ public struct MobileSettingsView: View {
                     }
                     .padding(.vertical, 4)
                     
-                    // 3. Clear Music Cache Button
+                    // 3. Clear Downloaded Music Button
                     Button(role: .destructive) {
                         MobileHaptics.trigger(.medium)
                         model.showClearCacheAlert = true
@@ -531,29 +531,12 @@ public struct MobileSettingsView: View {
                         HStack(spacing: 8) {
                             Image(systemName: "trash")
                                 .font(.system(size: 14, weight: .medium))
-                            Text("Clear Music Cache")
+                            Text("Clear Downloaded Music")
                                 .font(.system(size: 15, weight: .medium))
                         }
                     }
                     
-                    // 4. Clear Album Art Cache Button
-                    Button(role: .destructive) {
-                        MobileHaptics.trigger(.medium)
-                        model.showClearArtworkAlert = true
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "photo.stack")
-                                .font(.system(size: 14, weight: .medium))
-                            Text("Clear Album Art Cache")
-                                .font(.system(size: 15, weight: .medium))
-                            Spacer()
-                            Text(model.artworkCacheSizeText)
-                                .font(.system(size: 13))
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    
-                    // 5. Reset Listening History Button
+                    // 4. Reset Listening History Button
                     Button(role: .destructive) {
                         MobileHaptics.trigger(.medium)
                         model.showResetListeningAlert = true
@@ -680,21 +663,13 @@ public struct MobileSettingsView: View {
             .listStyle(.inset)
             #endif
         }
-        .alert("Clear Music Cache?", isPresented: $model.showClearCacheAlert) {
+        .alert("Clear Downloaded Music?", isPresented: $model.showClearCacheAlert) {
             Button("Cancel", role: .cancel) {}
             Button("Clear All", role: .destructive) {
                 clearCache()
             }
         } message: {
             Text("This will remove all downloaded offline songs and temporary stream buffers.")
-        }
-        .alert("Clear Album Art Cache?", isPresented: $model.showClearArtworkAlert) {
-            Button("Cancel", role: .cancel) {}
-            Button("Clear All", role: .destructive) {
-                clearArtworkCache()
-            }
-        } message: {
-            Text("This will delete all locally stored album art thumbnails (\(model.artworkCacheSizeText)). Missing artwork will automatically re-download when songs are played.")
         }
         .alert("Reset Listening History?", isPresented: $model.showResetListeningAlert) {
             Button("Cancel", role: .cancel) {}
@@ -817,17 +792,6 @@ public struct MobileSettingsView: View {
         Task.detached(priority: .userInitiated) {
             await MainActor.run {
                 AudioPlayerEngine.shared.clearAllOfflineDownloads()
-                MobileHaptics.trigger(.heavy)
-            }
-            await self.calculateCacheSize()
-        }
-    }
-    
-    private func clearArtworkCache() {
-        Task.detached(priority: .userInitiated) {
-            MediaCacheManager.shared.clearArtworkCache()
-            await MainActor.run {
-                model.artworkCacheSizeText = "0 KB"
                 MobileHaptics.trigger(.heavy)
             }
             await self.calculateCacheSize()
